@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Lessons · Setup check</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="t-top"><span class="brand">Live lessons — setup check</span></header>
+<main class="t-main stack" style="max-width:860px">
+  <section class="card stack" id="cfg"></section>
+  <section class="card stack">
+    <div class="kicker">Step 4 of the guide</div>
+    <h2>Database rules</h2>
+    <p class="muted small">Copy all of this. In Firebase console → Realtime Database → <b>Rules</b>, select everything in the editor, paste over it, and press <b>Publish</b>. These rules come from the teacher email and school domain in <code>js/config.js</code>, so publish them again if you change those.</p>
+    <div class="row"><button class="btn primary" id="copy">Copy rules</button><span class="small muted" id="copied"></span></div>
+    <pre class="rules" id="rules"></pre>
+  </section>
+  <section class="card stack small">
+    <h3>Pages</h3>
+    <p><a href="teacher.html">teacher.html</a> — your control page (laptop or phone) · <a href="present.html">present.html</a> — the projector · <a href="./">index.html</a> — the student page (the link the QR code opens)</p>
+  </section>
+</main>
+<script type="module">
+  import { firebaseConfig, TEACHER_EMAILS, SCHOOL_DOMAIN } from "./js/config.js";
+  import { buildRules } from "./js/rules.js";
+  const ok = (b) => b ? "✅" : "❌";
+  const cfgOk = !/PASTE_/.test(JSON.stringify(firebaseConfig));
+  const urlOk = /^https:\/\/.+(firebaseio\.com|firebasedatabase\.app)\/?$/.test(firebaseConfig.databaseURL || "");
+  const tOk = TEACHER_EMAILS.length && !TEACHER_EMAILS.some((e) => /yourschool|your\.name/.test(e));
+  const dOk = SCHOOL_DOMAIN && !/yourschool/.test(SCHOOL_DOMAIN);
+  document.getElementById("cfg").innerHTML = `<div class="kicker">js/config.js</div><h2>Settings</h2>
+    <p>${ok(cfgOk)} Firebase config pasted</p>
+    <p>${ok(urlOk)} databaseURL looks right <span class="muted small">(${firebaseConfig.databaseURL})</span></p>
+    <p>${ok(tOk)} Teacher email: <b>${TEACHER_EMAILS.join(", ")}</b></p>
+    <p>${ok(dOk)} Students' domain: <b>@${SCHOOL_DOMAIN}</b></p>
+    <p class="small muted">This site is at <b>${location.host || "(opened from a file)"}</b> — that host must be listed in Firebase console → Authentication → Settings → Authorized domains.</p>`;
+  const text = JSON.stringify(buildRules(TEACHER_EMAILS, SCHOOL_DOMAIN), null, 2);
+  document.getElementById("rules").textContent = text;
+  document.getElementById("copy").onclick = async () => {
+    try { await navigator.clipboard.writeText(text); document.getElementById("copied").textContent = "Copied — now paste it in the Firebase Rules editor."; }
+    catch (e) { document.getElementById("copied").textContent = "Select the text below and copy it by hand."; }
+  };
+</script>
+</body>
+</html>
