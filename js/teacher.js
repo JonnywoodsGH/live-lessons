@@ -5,6 +5,7 @@ import { $, esc, toast, joinUrl, optionLetters, tally, hingeSlideHtml, fmtTime }
 import * as L from "./session.js";
 import { uploadLesson, deleteLesson } from "./upload.js";
 import { rowsForSession, toCsv, download } from "./export.js";
+import { deckView } from "./deckview.js";
 
 const app = $("#app");
 const CONF_SHORT = ["", "guess", "unsure", "fairly sure", "certain"];
@@ -79,7 +80,7 @@ function renderAdd() {
   el.innerHTML = `<div class="kicker">Add</div><h2>Add or update a lesson</h2>
     <label class="field"><span>Lesson ID</span><input type="text" id="lid" placeholder="Y9-W8-L1"></label>
     <label class="field"><span>Title</span><input type="text" id="ltitle" placeholder="Methods of error detection"></label>
-    <label class="field"><span>Slides — one PDF, or all the slide images (PNG/JPEG)</span><input type="file" id="lfiles" accept=".pdf,application/pdf,image/*" multiple></label>
+    <label class="field"><span>Slides — an interactive deck (.html), one PDF, or all the slide images</span><input type="file" id="lfiles" accept=".html,.htm,text/html,.pdf,application/pdf,image/*" multiple></label>
     <label class="field"><span>Hinge questions file (optional, .json)</span><input type="file" id="lhinge" accept=".json,application/json"></label>
     <div class="progress hidden" id="lprog"><div></div></div><p class="small muted" id="lmsg"></p>
     <button class="btn accent" id="lgo">Upload lesson</button>
@@ -142,7 +143,7 @@ function leaveSession() {
   if (!CODE) return;
   sessionSubs.forEach((f) => f()); sessionSubs = [];
   if (voteSub) voteSub(); voteSub = null; voteKey = null;
-  CODE = S = LESSON = null; PRES = {}; VOTES = {}; thumbs = {};
+  CODE = S = LESSON = null; PRES = {}; VOTES = {}; thumbs = {}; if (tDeck) tDeck.destroy(); tDeck = null; tDeckLesson = null; tDeckP = null;
 }
 let sessionSubs = [];
 
@@ -156,7 +157,7 @@ async function openSession(code) {
   LESSON = await L.loadLesson(s0.lessonId);
   if (!LESSON) { toast("That lesson has been deleted."); return; }
   buildSessionView();
-  sessionSubs.push(watch(`sessions/${code}`, (v) => { S = v; if (!S) return; syncVotes(); renderSession(); }));
+  sessionSubs.push(watch(`sessions/${code}`, (v) => { S = v; if (!S) return; L.observe(code, S); syncVotes(); renderSession(); }));
   sessionSubs.push(watch(`presence/${code}`, (v) => { PRES = v || {}; renderSide(); renderStage(); renderTopCounts(); }));
   sessionSubs.push(watch("roster", (v) => { ROSTER = v || {}; renderSide(); }));
   loadThumbs();
@@ -184,7 +185,7 @@ function buildSessionView() {
     </div>
     <div class="t-grid">
       <section class="stack">
-        <div class="stage" id="stage"></div>
+        <div class="stage" id="stage"><div id="stageDeck" class="fill hidden"></div><div id="stageOther" class="fill"></div></div>
         <div class="row"><button class="btn" id="prevBtn">◀ Prev</button><span class="spacer"></span><span id="posLbl" class="muted"></span><span class="spacer"></span><button class="btn primary" id="nextBtn">Next ▶</button></div>
         <div class="strip" id="strip"></div>
         <p class="small muted">Keys: ← → move · V open/close voting · R results on the board · A reveal answer · J join screen. A clicker that sends Page Up/Down also works.</p>
@@ -214,7 +215,9 @@ function buildStrip() {
   const el = $("#strip");
   el.innerHTML = LESSON.order.map((it, i) => it.t === "hinge"
     ? `<button class="h" data-pos="${i}" title="Hinge ${esc(it.id)}"><span class="n">${i + 1}</span>Hinge ${esc(it.id)}</button>`
-    : `<button data-pos="${i}"><span class="n">${i + 1}</span><img alt="" data-n="${it.n}"></button>`).join("");
+    : it.t === "html"
+      ? `<button class="t" data-pos="${i}" title="${esc(it.title)}"><span class="n">${i + 1}</span><span class="tt">${esc(it.title)}</span>${it.max ? `<span class="bld">${it.max} build${it.max > 1 ? "s" : ""}</span>` : ""}</button>`
+      : `<button data-pos="${i}"><span class="n">${i + 1}</span><img alt="" data-n="${it.n}"></button>`).join("");
   el.querySelectorAll("button").forEach((b) => (b.onclick = () => L.jump(CODE, LESSON, +b.dataset.pos)));
 }
 async function loadThumbs() {
@@ -234,9 +237,10 @@ function renderTopCounts() { const p = $("#joinedPill"); if (p) p.textContent = 
 function renderSession() {
   if (!S || !$("#stage")) return;
   if (!S.active) return; // teacher/current is cleared → home
-  $("#posLbl").textContent = `Slide ${S.pos + 1} of ${S.total}`;
-  $("#prevBtn").disabled = S.pos <= 0;
-  $("#nextBtn").disabled = S.pos >= S.total - 1;
+  const itNow = LESSON.order[S.pos], mx = L.maxStep(itNow);
+  $("#posLbl").textContent = `Slide ${S.pos + 1} of ${S.total}${mx ? ` · build ${S.step || 0} of ${mx}` : ""}`;
+  $("#prevBtn").disabled = S.pos <= 0 && !(S.step > 0);
+  $("#nextBtn").disabled = S.pos >= S.total - 1 && (S.step || 0) >= mx;
   $("#joinBtn").classList.toggle("on", !!S.join);
   document.querySelectorAll("#strip button").forEach((b) => b.classList.toggle("cur", +b.dataset.pos === S.pos));
   const cur = document.querySelector("#strip button.cur");
@@ -244,10 +248,31 @@ function renderSession() {
   renderTopCounts(); renderStage(); renderSide();
 }
 
+let tDeck = null, tDeckLesson = null, tDeckP = null;
+function teacherDeck() {
+  if (tDeckP && tDeckLesson === LESSON.id) return tDeckP;
+  tDeckLesson = LESSON.id;
+  tDeckP = L.deckShell(LESSON.id).then((shell) => {
+    if (tDeck) tDeck.destroy();
+    tDeck = deckView($("#stageDeck"), shell || {});
+    return tDeck;
+  });
+  return tDeckP;
+}
 function renderStage() {
-  const el = $("#stage"); if (!el || !S) return;
+  const el = $("#stageOther"); if (!el || !S) return;
   const it = LESSON.order[S.pos];
   if (!it) return;
+  const deckHost = $("#stageDeck");
+  deckHost.classList.toggle("hidden", it.t !== "html");
+  el.classList.toggle("hidden", it.t === "html");
+  if (it.t === "html") {
+    const pos = S.pos, st = S.step || 0;
+    Promise.all([teacherDeck(), L.slideHtml(LESSON.id, it.n)]).then(([v, html]) => {
+      if (S && S.pos === pos) v.show(html || "", S.step || 0, null);
+    });
+    return;
+  }
   if (it.t === "hinge" && S.q) {
     const letters = optionLetters(S.q), counts = tally(VOTES, letters);
     el.innerHTML = hingeSlideHtml(S.q, { counts, showResults: true, reveal: S.reveal, open: S.q.open, closed: !S.q.open && S.opened && S.opened[S.q.key], answered: counts.total, joined: Object.keys(PRES).length });

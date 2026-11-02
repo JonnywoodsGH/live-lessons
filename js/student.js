@@ -2,6 +2,7 @@
 import { configured, auth, onUser, signIn, logOut, watch, read, r, set, onDisconnect, serverTimestamp, isTeacher } from "./fb.js";
 import { SCHOOL_DOMAIN } from "./config.js";
 import { $, esc, optionLetters, isCodeLike } from "./ui.js";
+import { deckView } from "./deckview.js";
 
 const app = $("#app");
 const CONF = [[1, "Guessing"], [2, "Not sure"], [3, "Fairly sure"], [4, "Certain"]];
@@ -14,7 +15,31 @@ const params = new URLSearchParams(location.search);
 const saved = () => { try { return sessionStorage.getItem("ll_code"); } catch (e) { return null; } };
 const remember = (c) => { try { c ? sessionStorage.setItem("ll_code", c) : sessionStorage.removeItem("ll_code"); } catch (e) {} };
 
-function screen(html) { app.innerHTML = `<div class="center"><div class="card stack">${html}</div></div>`; }
+function screen(html) { mounted = false; app.innerHTML = `<div class="center"><div class="card stack">${html}</div></div>`; }
+
+// live layout: the deck frame stays mounted (re-creating it would reload it), the rest is repainted
+let mounted = false, deck = null, deckLesson = null, deckLoading = null;
+function paint(mainHtml, showDeck) {
+  if (!mounted || !document.getElementById("main")) {
+    app.innerHTML = `<div id="hdr"></div><div class="s-main"><div id="deckHost" class="hidden"></div><div id="main"></div></div>`;
+    mounted = true; deck = null; deckLesson = null; deckLoading = null;
+  }
+  $("#hdr").innerHTML = header();
+  $("#deckHost").classList.toggle("hidden", !showDeck);
+  $("#main").innerHTML = mainHtml;
+}
+async function ensureDeck(lessonId) {
+  if (deck && deckLesson === lessonId) return deck;
+  if (deckLoading && deckLesson === lessonId) return deckLoading;
+  deckLesson = lessonId;
+  deckLoading = read(`shells/${lessonId}`).then((shell) => {
+    if (deckLesson !== lessonId || !document.getElementById("deckHost")) return null;
+    if (deck) deck.destroy();
+    deck = deckView($("#deckHost"), shell || {});
+    return deck;
+  });
+  return deckLoading;
+}
 
 if (!configured) {
   screen(`<h2>Not set up yet</h2><p class="muted">Your teacher still needs to add the Firebase settings to <code>js/config.js</code>.</p>`);
@@ -115,16 +140,22 @@ function header() {
 function render() {
   if (!S) return;
   if (!S.active) {
-    app.innerHTML = header() + `<div class="s-main"><div class="card stack" style="text-align:center"><h2>The lesson has ended</h2><p class="muted">Thanks for taking part.</p><button class="btn" id="again">Join another lesson</button></div></div>`;
+    paint(`<div class="card stack" style="text-align:center"><h2>The lesson has ended</h2><p class="muted">Thanks for taking part.</p><button class="btn" id="again">Join another lesson</button></div>`, false);
     $("#again").onclick = () => showCode();
     return;
   }
   if (S.kind === "hinge" && S.q) return renderQuestion();
+  const foot = `<p class="small muted" style="text-align:center;margin-top:.6rem">Slide ${S.pos + 1} of ${S.total} · this page follows your teacher's screen${innerWidth < 700 && S.kind !== "html" ? " · pinch to zoom" : ""}</p>`;
+  if (S.kind === "html") {
+    const ready = NOW && NOW.pos === S.pos && NOW.html != null;
+    paint(ready ? foot : `<div class="card"><p class="muted">Waiting for the slide…</p></div>`, ready);
+    if (ready) { const n = NOW; ensureDeck(n.deck).then((v) => v && v.show(n.html, n.step || 0, n.rev)); }
+    return;
+  }
   const img = NOW && NOW.pos === S.pos ? NOW.img : null;
-  app.innerHTML = header() + `<div class="s-main">${img
+  paint(`${img
     ? `<img class="s-slide" src="${img}" alt="Slide ${S.pos + 1}">`
-    : `<div class="card"><p class="muted">Waiting for the slide…</p></div>`}
-    <p class="small muted" style="text-align:center;margin-top:.6rem">Slide ${S.pos + 1} of ${S.total} · this page follows your teacher's screen${innerWidth < 700 ? " · pinch to zoom" : ""}</p></div>`;
+    : `<div class="card"><p class="muted">Waiting for the slide…</p></div>`}${foot}`, false);
 }
 
 function renderQuestion() {
@@ -150,7 +181,7 @@ function renderQuestion() {
   const needConf = q.confidence && canPick && pick.a;
   const ready = canPick && pick.a && (!q.confidence || pick.c) && (!sent || changed) && !pick.sending;
 
-  app.innerHTML = header() + `<div class="s-main stack s-q">
+  paint(`<div class="stack s-q">
     <div class="kicker">Hinge question${q.round > 1 ? " · round " + q.round : ""}</div>
     <h1>${esc(q.prompt)}</h1>
     ${q.code ? `<div class="code">${esc(q.code)}</div>` : ""}
@@ -161,7 +192,7 @@ function renderQuestion() {
       `<button data-c="${n}" class="${pick.c === n ? "sel" : ""}">${t}</button>`).join("")}</div></div>` : ""}
     ${canPick ? `<button class="btn accent" id="send" style="width:100%;min-height:54px" ${ready ? "" : "disabled"}>${pick.sending ? "Sending…" : sent ? "Change my answer" : "Send answer"}</button>` : ""}
     ${banner}
-  </div>`;
+  </div>`, false);
 
   app.querySelectorAll(".s-opt").forEach((b) => (b.onclick = () => { pick.a = b.dataset.l; render(); }));
   app.querySelectorAll(".conf button").forEach((b) => (b.onclick = () => { pick.c = +b.dataset.c; render(); }));

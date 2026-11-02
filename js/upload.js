@@ -1,4 +1,4 @@
-// Adding a lesson: slides (a PDF, or one image per slide) + an optional hinge-question file.
+// Adding a lesson: slides (an interactive HTML deck, a PDF, or one image per slide) + an optional hinge-question file.
 // Everything is turned into JPEGs in the browser and stored in the teacher-only part of the database,
 // so slide images and answers never sit in the public website/repo.
 import { r, set, update, serverTimestamp } from "./fb.js";
@@ -49,6 +49,25 @@ async function pdfToJpegs(file, onPage) {
   return out;
 }
 
+/** Read an interactive HTML deck: its slides (<section class="slide">), build counts, CSS and footer text. */
+export function parseDeck(text) {
+  const doc = new DOMParser().parseFromString(text, "text/html");
+  let secs = [...doc.querySelectorAll("#stage > .slide")];
+  if (!secs.length) secs = [...doc.querySelectorAll("section.slide, .slide")];
+  if (!secs.length) throw new Error("This HTML file has no slides (<section class=\"slide\">) — is it one of the interactive decks?");
+  const sections = secs.map((sec, n) => {
+    let max = 0;
+    sec.querySelectorAll("[data-step],[data-play],[data-start-at]").forEach((e) => {
+      max = Math.max(max, +(e.getAttribute("data-step") || e.getAttribute("data-play") || e.getAttribute("data-start-at") || 0) || 0);
+    });
+    return { n, html: sec.outerHTML, max, title: sec.getAttribute("data-title") || `Slide ${n + 1}` };
+  });
+  const css = [...doc.head.querySelectorAll('style, link[rel="stylesheet"]')].map((e) => e.outerHTML).join("\n");
+  const scripts = [...doc.querySelectorAll("script")].map((x) => x.textContent).join("\n");
+  const m = /textContent\s*=\s*(['"`])([^'"`]*)\1\s*\+\s*s\.dataset\.foot/.exec(scripts);
+  return { sections, css, foot: m ? m[2] : "", full: text };
+}
+
 const natural = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
 
 /** Check the hinge file and return {hinges: {H1: {...}}, list: [...]} or throw a readable error. */
@@ -84,6 +103,8 @@ export async function uploadLesson({ id, title, slideFiles, hingeText, onProgres
   if (!slideFiles || !slideFiles.length) throw new Error("Choose the slides: one PDF, or the slide images.");
 
   const files = [...slideFiles];
+  const htmlFile = files.find((f) => /html?$/i.test(f.type) || /\.html?$/i.test(f.name));
+  if (htmlFile) return uploadDeck({ id, title, htmlFile, hingeText, onProgress });
   let jpegs;
   const pdf = files.find((f) => /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name));
   if (pdf) {
@@ -121,7 +142,34 @@ export async function uploadLesson({ id, title, slideFiles, hingeText, onProgres
   return { id, slides: jpegs.length, hinges: list.length, kb };
 }
 
+async function uploadDeck({ id, title, htmlFile, hingeText, onProgress }) {
+  onProgress("Reading the deck…", 0.05);
+  const deck = parseDeck(await htmlFile.text());
+  const { hinges, list } = hingeText ? parseHinges(hingeText, deck.sections.length) : { hinges: {}, list: [] };
+  const order = [];
+  list.filter((h) => h.after === 0).forEach((h) => order.push({ t: "hinge", id: h.id }));
+  deck.sections.forEach((sec) => {
+    order.push({ t: "html", n: sec.n, max: sec.max, title: sec.title.slice(0, 120) });
+    list.filter((h) => h.after === sec.n + 1).forEach((h) => order.push({ t: "hinge", id: h.id }));
+  });
+  onProgress("Uploading…", 0.1);
+  await set(r(`slides/${id}`), null);
+  for (const sec of deck.sections) {
+    await set(r(`slides/${id}/${sec.n}`), sec.html);
+    onProgress(`Uploading slide ${sec.n + 1} of ${deck.sections.length}…`, 0.1 + ((sec.n + 1) / deck.sections.length) * 0.7);
+  }
+  await set(r(`shells/${id}`), { css: deck.css, foot: deck.foot });
+  onProgress("Uploading the full deck for the projector…", 0.85);
+  await set(r(`decks/${id}`), deck.full);
+  const kb = Math.round((deck.full.length + deck.sections.reduce((t, x) => t + x.html.length, 0)) / 1024);
+  await set(r(`lessons/${id}`), {
+    id, kind: "html", title: (title || id).trim(), slideCount: deck.sections.length, order, hinges, sizeKB: kb, uploadedAt: serverTimestamp(),
+  });
+  onProgress("Done", 1);
+  return { id, slides: deck.sections.length, hinges: list.length, kb };
+}
+
 export async function deleteLesson(id) {
-  const u = {}; u[`lessons/${id}`] = null; u[`slides/${id}`] = null;
+  const u = {}; u[`lessons/${id}`] = null; u[`slides/${id}`] = null; u[`shells/${id}`] = null; u[`decks/${id}`] = null;
   await update(r("/"), u);
 }

@@ -147,3 +147,15 @@ pre.rules { background: #1d2433; color: #e6edf3; padding: 1rem; border-radius: 1
 
 /* binary / code-like options line up in a fixed-width font */
 .hs-text.mono, .s-opt .mono { font-family: var(--mono); letter-spacing: .12em; font-weight: 600; }
+
+/* interactive HTML decks */
+.fill { position: absolute; inset: 0; }
+.fill > img { width: 100%; height: 100%; object-fit: contain; display: block; background: #fff; }
+.deckframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 10px; background: #0e1b2a; box-shadow: var(--shadow); }
+.fill > .deckframe, .stage .deckframe { position: absolute; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; border-radius: 0; box-shadow: none; }
+.strip button.t { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 2px; padding: 16px 6px 4px; text-align: left; font: 600 .68rem/1.2 var(--sans); color: var(--ink-2); background: #fffdf9; }
+.strip button.t .tt { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.strip button.t .bld { font-weight: 500; color: var(--muted); font-size: .62rem; }
+.corner-code { transition: opacity .3s; }
+body.present .corner-code:not(.always) { opacity: 0; }
+body.present.hud-awake .corner-code { opacity: 1; }

@@ -1,6 +1,7 @@
 // Running a live lesson: the teacher-side actions, shared by teacher.html and present.html.
 import { r, read, update, set, serverTimestamp } from "./fb.js";
 import { ymd } from "./ui.js";
+import { prepSection } from "./deckview.js";
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no I/L/O/0/1
 
@@ -25,7 +26,21 @@ export async function slideImg(lessonId, n) {
   if (!slideCache[k]) slideCache[k] = read(`slides/${lessonId}/${n}`);
   return slideCache[k];
 }
+export const slideHtml = slideImg; // HTML decks store each slide's <section> at the same path
 export function preload(lessonId, n) { if (n >= 0) slideImg(lessonId, n).catch(() => {}); }
+
+const shellCache = {};
+export function deckShell(lessonId) {
+  if (!shellCache[lessonId]) shellCache[lessonId] = read(`shells/${lessonId}`);
+  return shellCache[lessonId];
+}
+const prepCache = {};
+async function prepped(lessonId, n) {
+  const k = lessonId + "/" + n;
+  if (!prepCache[k]) prepCache[k] = slideHtml(lessonId, n).then((h) => prepSection(h || ""));
+  return prepCache[k];
+}
+export const maxStep = (item) => (item && item.t === "html" ? item.max || 0 : 0);
 
 /** Public (student-safe) copy of a hinge question: no answer, no misconception tags. */
 function publicQ(h, round = 1) {
@@ -55,18 +70,41 @@ export async function startSession(lessonId, cls, ownerEmail) {
   return code;
 }
 
-export async function goTo(code, lesson, pos) {
+// what students are seeing now (kept up to date by the pages' session watchers via observe())
+let live = { code: null, pos: -1 };
+export function observe(code, s) { if (s) live = { code, pos: s.pos }; }
+export async function goTo(code, lesson, pos, st = 0) {
   pos = Math.max(0, Math.min(lesson.order.length - 1, pos));
   const item = lesson.order[pos];
+  st = Math.max(0, Math.min(maxStep(item), st || 0));
+  const samePos = live.code === code && live.pos === pos;
   const u = {};
   u[`sessions/${code}/pos`] = pos;
-  u[`sessions/${code}/results`] = false;
-  u[`sessions/${code}/reveal`] = null;
+  u[`sessions/${code}/step`] = st;
+  if (!samePos) {
+    u[`sessions/${code}/results`] = false;
+    u[`sessions/${code}/reveal`] = null;
+  }
   if (item.t === "hinge") {
-    const h = lesson.hinges[item.id];
-    u[`sessions/${code}/kind`] = "hinge";
-    u[`sessions/${code}/q`] = publicQ(h, 1);
-    u[`now/${code}`] = { pos, img: null };
+    if (!samePos) {
+      const h = lesson.hinges[item.id];
+      u[`sessions/${code}/kind`] = "hinge";
+      u[`sessions/${code}/q`] = publicQ(h, 1);
+      u[`now/${code}`] = { pos, img: null };
+    }
+  } else if (item.t === "html") {
+    const p = await prepped(lesson.id, item.n);
+    // builds up to this step are sent; later ones stay scrambled on students' devices
+    const rev = {};
+    Object.keys(p.rev).forEach((k) => { if (+k.slice(1) <= st) rev[k] = p.rev[k]; });
+    if (samePos) {
+      u[`now/${code}/step`] = st;
+      Object.keys(rev).forEach((k) => (u[`now/${code}/rev/${k}`] = rev[k]));
+    } else {
+      u[`sessions/${code}/kind`] = "html";
+      u[`sessions/${code}/q`] = null;
+      u[`now/${code}`] = { pos, step: st, deck: lesson.id, html: p.base, rev };
+    }
   } else {
     const img = await slideImg(lesson.id, item.n);
     u[`sessions/${code}/kind`] = "img";
@@ -74,28 +112,43 @@ export async function goTo(code, lesson, pos) {
     u[`now/${code}`] = { pos, img: img || null };
   }
   await update(r("/"), u);
+  live = { code, pos };
   // warm the cache for the neighbours
-  [pos + 1, pos - 1].forEach((p) => { const it = lesson.order[p]; if (it && it.t === "img") preload(lesson.id, it.n); });
+  [pos + 1, pos - 1].forEach((q) => {
+    const it = lesson.order[q];
+    if (it && it.t === "img") preload(lesson.id, it.n);
+    if (it && it.t === "html") prepped(lesson.id, it.n).catch(() => {});
+  });
 }
 
-/** Next/previous that never loses a press, even when a clicker is tapped quickly several times. */
+/** Next/previous that never loses a press, even when a clicker is tapped quickly several times.
+ *  On an HTML deck slide, "next" first reveals the slide's builds one by one. */
 let navTarget = null, navChain = Promise.resolve();
-export function step(code, lesson, s, delta) {
-  if (!s || !lesson) return;
-  const base = navTarget == null ? s.pos : navTarget;
-  const target = Math.max(0, Math.min(lesson.order.length - 1, base + delta));
-  if (target === base) return;
+function nextOf(lesson, pos, st) {
+  const it = lesson.order[pos];
+  if (st < maxStep(it)) return [pos, st + 1];
+  if (pos < lesson.order.length - 1) return [pos + 1, 0];
+  return null;
+}
+function prevOf(lesson, pos, st) {
+  if (st > 0) return [pos, st - 1];
+  if (pos > 0) return [pos - 1, maxStep(lesson.order[pos - 1])];
+  return null;
+}
+function queue(code, lesson, target) {
   navTarget = target;
-  navChain = navChain.then(() => goTo(code, lesson, target)).catch((e) => console.warn(e))
+  navChain = navChain.then(() => goTo(code, lesson, target[0], target[1])).catch((e) => console.warn(e))
     .then(() => { if (navTarget === target) navTarget = null; });
   return navChain;
 }
-export function jump(code, lesson, pos) {
-  navTarget = pos;
-  navChain = navChain.then(() => goTo(code, lesson, pos)).catch((e) => console.warn(e))
-    .then(() => { if (navTarget === pos) navTarget = null; });
-  return navChain;
+export function step(code, lesson, s, delta) {
+  if (!s || !lesson) return;
+  const base = navTarget || [s.pos, s.step || 0];
+  const target = delta > 0 ? nextOf(lesson, base[0], base[1]) : prevOf(lesson, base[0], base[1]);
+  if (!target) return;
+  return queue(code, lesson, target);
 }
+export function jump(code, lesson, pos, st = 0) { return queue(code, lesson, [pos, st]); }
 
 export async function openVote(code, s) {
   if (!s.q) return;

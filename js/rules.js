@@ -12,6 +12,8 @@ export function buildRules(teacherEmails, schoolDomain) {
     rules: {
       lessons: { ".read": T, ".write": T },
       slides: { ".read": T, ".write": T },
+      decks: { ".read": T, ".write": T },
+      shells: { $lesson: { ".read": S, ".write": T } },
       teacher: { ".read": T, ".write": T },
       sessions: { ".read": T, ".write": T, $code: { ".read": S } },
       now: { $code: { ".read": S, ".write": T } },
