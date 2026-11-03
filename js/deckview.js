@@ -16,15 +16,26 @@ const RENDERER = `(function(){
     Object.keys(rev).filter(function(k){return /^s\\d+$/.test(k)&&rev[k];}).sort(function(a,b){return a.slice(1)-b.slice(1)}).forEach(function(s){ if(applied[s])return; var m=rev[s];
       Object.keys(m).forEach(function(i){ if(m[i]==null)return; var el=sec.querySelector('[data-ll="'+i.slice(1)+'"]'); if(el) el.innerHTML=m[i];}); applied[s]=1; }); }
   function instant(fn){ if(sec)sec.classList.add('instant'); fn(); void stage.offsetWidth; if(sec)sec.classList.remove('instant'); }
+  var tms=[];
+  function fmt(x){x=Math.max(0,Math.ceil(x));return Math.floor(x/60)+':'+('0'+(x%60)).slice(-2);}
+  function timers(ago){ if(!sec)return; var now=Date.now(); tms=[];
+    sec.querySelectorAll('.timer[data-seconds]').forEach(function(b){ var k=b.getAttribute('data-start-at'), total=+b.getAttribute('data-seconds')||0;
+      var a=(k!=null&&ago&&ago['s'+k]!=null&&+k<=cur)?ago['s'+k]:null; tms.push({b:b,total:total,end:a==null?null:now-a+total*1000}); });
+    tick(); }
+  function tick(){ var now=Date.now(); tms.forEach(function(t){ var left=t.end==null?t.total:(t.end-now)/1000, run=t.end!=null&&left>0, done=t.end!=null&&left<=0;
+    var tt=t.b.querySelector('.t-time'), ic=t.b.querySelector('.t-ico'); if(tt)tt.textContent=fmt(left); if(ic)ic.textContent=run?'\u275a\u275a':'\u25b6';
+    t.b.classList.toggle('running',run&&left>10); t.b.classList.toggle('warn',run&&left<=10); t.b.classList.toggle('done',done); }); }
+  setInterval(tick,250);
   addEventListener('message',function(ev){ var d=ev.data; if(!d||d.ll!==1)return;
     if(d.html!=null){
       stage.innerHTML=d.html; sec=stage.querySelector('.slide'); applied={}; cur=-1;
       if(sec){ sec.classList.add('active');
         if(FOOT&&sec.dataset.foot&&!sec.querySelector('.foot')){var f=document.createElement('div');f.className='foot';f.textContent=FOOT+sec.dataset.foot;sec.appendChild(f);}
         stage.classList.toggle('on-dark',sec.classList.contains('dark')); }
-      revs(d.rev); instant(function(){apply(d.step,0);}); return; }
+      revs(d.rev); instant(function(){apply(d.step,0);}); timers(d.ago); return; }
     revs(d.rev);
     if(d.step<cur) instant(function(){apply(d.step,-1);}); else apply(d.step,1);
+    timers(d.ago);
   });
   parent.postMessage({ll:'ready'},'*');
 })();`;
@@ -60,10 +71,11 @@ export function deckView(host, shell) {
   window.addEventListener("message", onMsg);
   return {
     el: f,
-    show(html, step, rev) {
-      const m = { ll: 1, step: step || 0, rev: rev || null };
+    /** ago: {s<step>: ms since that step was reached} — runs the slide's timers in step with the board */
+    show(html, step, rev, ago) {
+      const m = { ll: 1, step: step || 0, rev: rev || null, ago: ago || null };
       if (html !== lastHtml) { m.html = html; lastHtml = html; }
-      if (!ready) { pending = { ll: 1, step: m.step, rev: m.rev, html: lastHtml }; return; }
+      if (!ready) { pending = { ll: 1, step: m.step, rev: m.rev, ago: m.ago, html: lastHtml }; return; }
       f.contentWindow.postMessage(m, "*");
     },
     destroy() { window.removeEventListener("message", onMsg); f.remove(); },

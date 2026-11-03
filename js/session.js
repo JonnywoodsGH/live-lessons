@@ -119,6 +119,7 @@ export async function startSession(lessonId, cls, ownerEmail, opts = {}) {
   return code;
 }
 
+let stepAt = { pos: -1, seen: {} };
 export async function goTo(code, lesson, pos, st = 0) {
   pos = Math.max(0, Math.min(lesson.order.length - 1, pos));
   const item = lesson.order[pos];
@@ -151,11 +152,18 @@ export async function goTo(code, lesson, pos, st = 0) {
     // builds up to this step go to students; later ones stay scrambled on their devices.
     const rev = {};
     Object.keys(p.rev).forEach((k) => { if (+k.slice(1) <= st) rev[k] = p.rev[k]; });
+    // when each step was first reached: deck timers that start at a step count down on students' screens too
+    if (!samePos || stepAt.pos !== pos) stepAt = { pos, seen: {} };
+    const ts = {};
+    // the deck itself starts a timer only when it moves forward one step (or arrives on the slide), not on a jump
+    const forward = samePos ? st === ((s && s.step) || 0) + 1 : st === 0;
+    if (forward && !stepAt.seen[st]) { stepAt.seen[st] = 1; ts["s" + st] = serverTimestamp(); }
     if (samePos) {
       u[`now/${code}/step`] = st;
       Object.keys(rev).forEach((k) => (u[`now/${code}/rev/${k}`] = rev[k]));
+      Object.keys(ts).forEach((k) => (u[`now/${code}/ts/${k}`] = ts[k]));
     } else {
-      u[`now/${code}`] = { pos, step: st, deck: lesson.id, html: p.base, rev };
+      u[`now/${code}`] = { pos, step: st, deck: lesson.id, html: p.base, rev, ts };
     }
     // the first ANSWER build on the projector closes voting; each answer build reveals its question on devices
     // (other builds — e.g. the hinge timer or "whiteboards up" — leave voting open)

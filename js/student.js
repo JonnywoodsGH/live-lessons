@@ -37,28 +37,18 @@ function paint(mainHtml, showDeck, below = "") {
   // slides use the whole screen; questions and messages stay in a readable column
   const wide = showDeck || /class="s-slide"/.test(mainHtml);
   app.querySelector(".s-main").classList.toggle("wide", wide);
-  fsButton(wide);
   $("#main").innerHTML = mainHtml;
   $("#below").innerHTML = below;
 }
-/** ⛶ on the slide: full screen on devices that allow it (laptops, Android, iPad — not iPhone). */
-function fsButton(on) {
-  let b = document.getElementById("fsBtn");
-  const can = document.fullscreenEnabled || document.webkitFullscreenEnabled;
-  if (!on && (document.fullscreenElement || document.webkitFullscreenElement)) (document.exitFullscreen || document.webkitExitFullscreen).call(document);   // a question: back to normal
-  const host = document.getElementById("deckHost");
-  if (!on || !can || !host || host.classList.contains("hidden")) { if (b) b.remove(); return; }
-  if (b && b.parentElement === host) return;
-  if (b) b.remove();
-  b = document.createElement("button");
-  b.id = "fsBtn"; b.className = "fs-btn"; b.type = "button"; b.title = "Full screen"; b.textContent = "⛶";
-  b.onclick = () => {
-    const box = app.querySelector(".s-main");
-    if (document.fullscreenElement || document.webkitFullscreenElement) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-    else (box.requestFullscreen || box.webkitRequestFullscreen).call(box).catch?.(() => {});
-  };
-  host.appendChild(b);
+/** ⛶ in the header: the whole student page goes full screen (laptops, Android, iPad — not iPhone).
+ *  It stays full screen through slide changes and questions, with the header and notes still there. */
+const fsCan = () => !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+const fsOn = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+function toggleFullscreen() {
+  if (fsOn()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  else { const r = (app.requestFullscreen || app.webkitRequestFullscreen).call(app); if (r && r.catch) r.catch(() => {}); }
 }
+["fullscreenchange", "webkitfullscreenchange"].forEach((ev) => document.addEventListener(ev, () => { const b = document.getElementById("fsBtn"); if (b) b.classList.toggle("on", fsOn()); }));
 async function ensureDeck(lessonId) {
   if (deck && deckLesson === lessonId) return deck;
   if (deckLoading && deckLesson === lessonId) return deckLoading;
@@ -156,7 +146,7 @@ function slideTitle() {
 function followSlide() { if (notesOn && S && S.mode !== "self") { setSlide(S.pos, slideTitle()); setReview(S.review); } }
 // notes: live lessons only, not for the teacher's "Student view"
 let notesOn = false;
-app.addEventListener("click", (e) => { if (e.target.closest("#notesBtn")) toggleNotes(); });
+app.addEventListener("click", (e) => { if (e.target.closest("#notesBtn")) toggleNotes(); if (e.target.closest("#fsBtn")) toggleFullscreen(); });
 
 async function join(c) {
   stopAll();
@@ -236,6 +226,7 @@ function header() {
     ${left != null ? `<span class="pill timer-pill ${left <= 5 ? "warn" : ""}" id="tleft">⏱ ${fmtSecs(left)}</span>` : ""}
     ${PREVIEW ? `<span class="pill">Student view</span>` : me && S.points !== false ? `<span class="pill score">★ ${me.p} · #${me.r}</span>` : ""}
     ${S && S.active && notesOn ? notesButton() : ""}
+    ${S && S.active && !PREVIEW && fsCan() ? `<button class="pill fs-pill ${fsOn() ? "on" : ""}" id="fsBtn" type="button" title="Full screen">⛶</button>` : ""}
     ${S && S.active && S.mode !== "self" ? `<span class="pill live">Live</span>` : ""}
     <span class="pill">${esc(code)}</span>
   </div>`;
@@ -361,7 +352,11 @@ function render() {
   if (S.kind === "html") {
     const ready = NOW && NOW.pos === S.pos && NOW.html != null;
     paint(ready ? "" : `<div class="card"><p class="muted">Waiting for the slide…</p></div>`, ready, ready ? foot : "");
-    if (ready) { const n = NOW; ensureDeck(n.deck).then((v) => v && v.show(n.html, n.step || 0, n.rev)); }
+    if (ready) {
+      const n = NOW, now = Date.now() + offset, ago = {};
+      Object.entries(n.ts || {}).forEach(([k, at]) => { if (typeof at === "number") ago[k] = Math.max(0, now - at); });
+      ensureDeck(n.deck).then((v) => v && v.show(n.html, n.step || 0, n.rev, ago));
+    }
     return;
   }
   const img = NOW && NOW.pos === S.pos ? NOW.img : null;
