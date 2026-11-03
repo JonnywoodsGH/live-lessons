@@ -25,5 +25,10 @@ export const TEACHER_EMAILS = ["v.johnwa@vinschool.edu.vn"];
 //    (they can't run lessons — only TEACHER_EMAILS can). Remove it after testing.
 export const SCHOOL_DOMAIN = ["stu.vinschool.edu.vn", "vinschool.edu.vn"];
 
-// 4. Default class label used in session IDs and the CSV (matches the AfL Platform).
+// 4. Students' notes by email (optional). Paste the "Web app URL" from Google Apps Script here —
+//    setup.html has the script and the steps. Leave it "" and students can still take notes and
+//    copy them at the end, but nothing is emailed.
+export const NOTES_EMAIL_URL = "";
+
+// 5. Default class label used in session IDs and the CSV (matches the AfL Platform).
 export const DEFAULT_CLASS = "IGCSE2627";

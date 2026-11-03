@@ -2,8 +2,11 @@
 //  • Teacher (your email) — everything.
 //  • Students (school domain) — read the session they joined + the current slide; write only their own
 //    answer, only while that question is open (or any time in a student-paced assignment, once);
-//    read the correct answer only AFTER they have answered (instant feedback / student-paced) or after
-//    you reveal it. They never see other students' answers, the lesson file or slides not yet shown.
+//    read the correct answer only AFTER they have answered AND the question has closed (automatic feedback),
+//    in a student-paced assignment, or after you reveal it. They never see other students' answers,
+//    the lesson file or slides not yet shown.
+//  • Students' lesson notes are private to each student (the teacher can't read them).
+//  • Time away from the lesson page: each student writes their own; only the teacher can read it.
 export function buildRules(teacherEmails, schoolDomain) {
   const q = (s) => "'" + String(s).toLowerCase().replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
   const T = "(auth != null && auth.token.email_verified == true && (" +
@@ -28,7 +31,7 @@ export function buildRules(teacherEmails, schoolDomain) {
         ".read": T, ".write": T,
         $code: {
           $vk: {
-            ".read": `auth != null && root.child('votes').child($code).child($vk).child(auth.uid).exists() && (${sess("feedback")}.val() == 'instant' || ${self} || ${sess("reveal")}.child($vk).exists())`,
+            ".read": `auth != null && root.child('votes').child($code).child($vk).child(auth.uid).exists() && ((${sess("feedback")}.val() == 'instant' && ${sess("open")}.child($vk).val() != true) || ${self} || ${sess("reveal")}.child($vk).exists())`,
           },
         },
       },
@@ -38,7 +41,7 @@ export function buildRules(teacherEmails, schoolDomain) {
           $vk: {
             $uid: {
               ".read": "auth != null && auth.uid == $uid",
-              ".write": `${S} && auth.uid == $uid && ${active} && ((${self} && !data.exists()) || (${live} && ${sess("open")}.child($vk).val() == true && (!data.exists() || ${sess("feedback")}.val() == 'reveal')))`,
+              ".write": `${S} && auth.uid == $uid && ${active} && ((${self} && !data.exists()) || (${live} && ${sess("open")}.child($vk).val() == true))`,
               ".validate": "newData.hasChild('t') && (newData.hasChild('a') || newData.hasChild('w'))",
               a: { ".validate": "newData.isString() && newData.val().matches(/^[A-F1-6]$/)" },
               w: { ".validate": "newData.isString() && newData.val().matches(/^[^ ]{1,30}$/)" },
@@ -60,6 +63,36 @@ export function buildRules(teacherEmails, schoolDomain) {
             t: { ".validate": "newData.val() == now" },
             done: { ".validate": "newData.isBoolean()" },
             seen: { $vk: { ".validate": "(!data.exists() && newData.val() == now) || data.val() == newData.val()" } },
+            $other: { ".validate": false },
+          },
+        },
+      },
+      // students' own lesson notes: only that student can read or write them — not the teacher.
+      // Written while the lesson is running; deleted by the student's page once emailed.
+      notes: {
+        $code: {
+          $uid: {
+            ".read": "auth != null && auth.uid == $uid",
+            ".write": `${S} && auth.uid == $uid && (${active} || !newData.exists())`,
+            ".validate": "newData.hasChildren(['s', 't'])",
+            s: { $p: { ".validate": "$p.matches(/^p[0-9]{1,3}$/) && newData.isString() && newData.val().length <= 2000" } },
+            h: { $p: { ".validate": "$p.matches(/^p[0-9]{1,3}$/) && newData.isString() && newData.val().length <= 120" } },
+            t: { ".validate": "newData.val() == now" },
+            $other: { ".validate": false },
+          },
+        },
+      },
+      // time away from the lesson page (live lessons): the teacher can read it, each student writes only their own.
+      away: {
+        $code: {
+          ".read": T,
+          $uid: {
+            ".read": "auth != null && auth.uid == $uid",
+            ".write": `${S} && auth.uid == $uid && ${active} && ${live}`,
+            ".validate": "newData.hasChildren(['w', 'k'])",
+            a: { ".validate": "newData.val() == now" },
+            w: { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 86400" },
+            k: { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000" },
             $other: { ".validate": false },
           },
         },

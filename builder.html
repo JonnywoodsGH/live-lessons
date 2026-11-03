@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Question Builder</title>
+<link rel="stylesheet" href="app.css">
+<style>
+  .qb { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 980px) { .qb { grid-template-columns: 1fr; } }
+  .qb .card { display: grid; gap: .8rem; }
+  .qb label.field { display: grid; gap: .3rem; }
+  .qb input[type=text], .qb input[type=number], .qb textarea, .qb select { font: inherit; padding: .5rem .65rem; border: 1px solid var(--line); border-radius: 10px; background: #fff; width: 100%; box-sizing: border-box; }
+  .qb textarea { min-height: 3.2em; resize: vertical; }
+  .seg { display: flex; gap: .4rem; flex-wrap: wrap; }
+  .seg label { display: flex; gap: .4rem; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: .45rem .8rem; cursor: pointer; background: #fff; }
+  .seg label:has(input:checked) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+  .opt { display: grid; grid-template-columns: 2.2rem 1fr auto; gap: .5rem; align-items: center; }
+  .opt .l { width: 2.2rem; height: 2.2rem; border-radius: 8px; background: var(--ink); color: #fff; display: grid; place-items: center; font-weight: 800; }
+  .opt .rt { display: flex; gap: .3rem; align-items: center; font-size: .85rem; white-space: nowrap; }
+  .wrong { grid-column: 2 / 4; display: grid; grid-template-columns: 1fr 9rem; gap: .5rem; }
+  .preview-box { position: sticky; top: 70px; display: grid; gap: .6rem; }
+  #preview { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 10px; background: #0e1b2a; box-shadow: var(--shadow); }
+  #problems { margin: 0; padding-left: 1.2rem; color: var(--bad); font-size: .9rem; }
+  body[data-mode="html"] .pdf-only, body[data-mode="pdf"] .html-only { display: none !important; }
+  body[data-qtype="mcq"] .word-only, body[data-qtype="word"] .mcq-only { display: none !important; }
+  .bad { color: var(--bad); }
+  #added ol { margin: .3rem 0 0; padding-left: 1.3rem; display: grid; gap: .3rem; }
+</style>
+</head>
+<body data-mode="html" data-qtype="mcq">
+<header class="t-top"><a class="brand" href="teacher.html" style="text-decoration:none">Live lessons</a><span class="small muted">Question builder</span><span class="spacer"></span><a class="small" href="teacher.html">Teacher page →</a></header>
+<main class="t-main">
+  <div class="qb">
+    <div class="stack">
+      <section class="card">
+        <div class="kicker">1 · Where will the question go?</div>
+        <div class="seg">
+          <label><input type="radio" name="mode" value="html" checked> Into an interactive HTML deck</label>
+          <label><input type="radio" name="mode" value="pdf"> A PDF lesson (makes a question file)</label>
+        </div>
+        <div class="html-only stack">
+          <label class="field"><span>Choose the deck on your computer <span class="muted small">(it stays on your computer and isn't uploaded)</span></span><input type="file" id="deckFile" accept=".html,.htm,text/html"></label>
+          <p class="small" id="deckInfo"></p>
+          <label class="field hidden" id="deckPick"><span>Put the question after slide</span><select id="after"></select></label>
+        </div>
+        <div class="pdf-only stack">
+          <p class="small muted">For PowerPoint, Keynote, Google Slides or Canva lessons exported as a PDF. You'll get a question file to upload with the PDF on the teacher page.</p>
+          <label class="field"><span>Put the question after slide number <span class="muted small">(0 = before slide 1)</span></span><input type="number" id="afterNum" min="0" value="1"></label>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="kicker">2 · The question</div>
+        <div class="seg">
+          <label><input type="radio" name="qtype" value="mcq" checked> Hinge question (A–D)</label>
+          <label><input type="radio" name="qtype" value="word"> One word (word cloud)</label>
+        </div>
+        <label class="field"><span>Question</span><textarea id="prompt" placeholder="e.g. Which memory loses its contents when the power is turned off?"></textarea></label>
+
+        <div class="mcq-only stack">
+          <label class="chk small"><input type="checkbox" id="isCode"> The options are code or pseudocode (show them in a code font)</label>
+          <div class="small muted">Fill in 2 to 4 options, tick the right one, and say why each wrong one is wrong. Students see that as "Why not B". The misconception ID (e.g. MC-RAM-01) is optional; it goes in the CSV export so you can track that misconception across lessons.</div>
+          <div class="stack" id="opts"></div>
+          <label class="field"><span>Decide <span class="muted small">(what you'll do if many get it wrong; shown after the answer)</span></span><input type="text" id="decide" placeholder="e.g. Ask: does the data survive a power cut? If not, it's volatile."></label>
+        </div>
+
+        <div class="word-only stack">
+          <label class="field"><span>Accepted answers <span class="muted small">(separate with commas, e.g. volatile, non-permanent)</span></span><input type="text" id="accept"></label>
+          <label class="field"><span>Short explanation <span class="muted small">(optional, shown with the answers)</span></span><input type="text" id="wexplain"></label>
+        </div>
+
+        <div class="row" style="gap:12px;flex-wrap:wrap">
+          <label class="field" style="width:9rem"><span>Time (seconds)</span><input type="number" id="time" min="10" max="600" value="30"></label>
+          <label class="field" style="flex:1;min-width:12rem"><span>Topic <span class="muted small">(footer, e.g. 3.1 Memory)</span></span><input type="text" id="topic"></label>
+          <label class="field" style="flex:1;min-width:10rem"><span>ID <span class="muted small" id="qidHint"></span></span><input type="text" id="qid" placeholder="made from the question"></label>
+        </div>
+        <ul id="problems" class="hidden"></ul>
+        <div class="row" style="flex-wrap:wrap">
+          <button class="btn primary" id="addBtn" type="button">Add to the deck</button>
+          <button class="btn" id="copyBtn" type="button" title="For pasting into a deck by hand">Copy slide code</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="kicker">3 · Download</div>
+        <div id="added"><p class="small muted">Questions you add appear here. You can add several before downloading.</p></div>
+        <button class="btn accent hidden" id="dlDeck" type="button">⬇ Download the updated deck</button>
+        <button class="btn accent hidden" id="dlJson" type="button">⬇ Download the question file</button>
+        <p class="small muted html-only">Then upload the updated deck on the teacher page as usual (same lesson ID to replace the old one). Your original file isn't changed.</p>
+        <p class="small muted pdf-only">On the teacher page, choose the PDF and this question file together when adding the lesson.</p>
+      </section>
+    </div>
+
+    <div class="preview-box">
+      <div class="row"><div class="kicker">Preview</div><span class="spacer"></span><label class="chk small"><input type="checkbox" id="showAns"> Show the answer steps</label></div>
+      <iframe id="preview" sandbox="allow-scripts" title="Slide preview"></iframe>
+      <p class="small muted" id="previewNote"></p>
+    </div>
+  </div>
+</main>
+<script type="module">
+  const L = ["A", "B", "C", "D"];
+  document.getElementById("opts").innerHTML = L.map((k, i) => `<div class="opt">
+    <span class="l">${k}</span><input type="text" id="o${i}" placeholder="Option ${k}">
+    <label class="rt"><input type="radio" name="right" value="${k}"> right</label>
+    <div class="wrong"><input type="text" id="w${i}" placeholder="Why ${k} is wrong"><input type="text" id="m${i}" placeholder="MC-… (optional)"></div>
+  </div>`).join("");
+  const { init } = await import("./js/builder.js");
+  init();
+</script>
+</body>
+</html>

@@ -5,6 +5,8 @@ import { configured, onUser, signIn, logOut, watch, read, r, set, update, onDisc
 import { SCHOOL_DOMAIN } from "./config.js";
 import { $, esc, isCodeLike, cloudHtml, boardHtml, fmtSecs, normS } from "./ui.js";
 import { deckView } from "./deckview.js";
+import { startNotes, stopNotes, setNotesTitle, setSlide, setReview, notesButton, paintDock, toggleNotes, sendNotesAtEnd, endedNotesHtml, wireEnded } from "./notes.js";
+import { startAway, stopAway, awayText } from "./away.js";
 
 const app = $("#app");
 const CONF = [[1, "Guessing"], [2, "Not sure"], [3, "Fairly sure"], [4, "Certain"]];
@@ -26,13 +28,36 @@ function screen(html) { mounted = false; app.innerHTML = `<div class="center"><d
 let mounted = false, deck = null, deckLesson = null, deckLoading = null;
 function paint(mainHtml, showDeck, below = "") {
   if (!mounted || !document.getElementById("main")) {
-    app.innerHTML = `<div id="hdr"></div><div class="s-main"><div id="main"></div><div id="deckHost" class="hidden"></div><div id="below"></div></div>`;
+    app.innerHTML = `<div id="hdr"></div><div class="s-main"><div id="main"></div><div id="deckHost" class="hidden"></div><div id="below"></div></div><div id="notesDock"></div>`;
     mounted = true; deck = null; deckLesson = null; deckLoading = null;
+    paintDock();
   }
   $("#hdr").innerHTML = header();
   $("#deckHost").classList.toggle("hidden", !showDeck);
+  // slides use the whole screen; questions and messages stay in a readable column
+  const wide = showDeck || /class="s-slide"/.test(mainHtml);
+  app.querySelector(".s-main").classList.toggle("wide", wide);
+  fsButton(wide);
   $("#main").innerHTML = mainHtml;
   $("#below").innerHTML = below;
+}
+/** ⛶ on the slide: full screen on devices that allow it (laptops, Android, iPad — not iPhone). */
+function fsButton(on) {
+  let b = document.getElementById("fsBtn");
+  const can = document.fullscreenEnabled || document.webkitFullscreenEnabled;
+  if (!on && (document.fullscreenElement || document.webkitFullscreenElement)) (document.exitFullscreen || document.webkitExitFullscreen).call(document);   // a question: back to normal
+  const host = document.getElementById("deckHost");
+  if (!on || !can || !host || host.classList.contains("hidden")) { if (b) b.remove(); return; }
+  if (b && b.parentElement === host) return;
+  if (b) b.remove();
+  b = document.createElement("button");
+  b.id = "fsBtn"; b.className = "fs-btn"; b.type = "button"; b.title = "Full screen"; b.textContent = "⛶";
+  b.onclick = () => {
+    const box = app.querySelector(".s-main");
+    if (document.fullscreenElement || document.webkitFullscreenElement) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    else (box.requestFullscreen || box.webkitRequestFullscreen).call(box).catch?.(() => {});
+  };
+  host.appendChild(b);
 }
 async function ensureDeck(lessonId) {
   if (deck && deckLesson === lessonId) return deck;
@@ -86,6 +111,7 @@ function showCode(msg) {
     ${msg ? `<div class="banner bad">${esc(msg)}</div>` : ""}
     <input id="code" class="code-input" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="····">
     <button class="btn primary" id="go" style="width:100%">Join</button>
+    <p class="small muted">👀 During a live lesson your teacher can see if you leave this page (switch tab or app).</p>
     <p class="small muted">Signed in as ${esc(user.email)} · <a href="#" id="out">not you?</a></p>
     ${isTeacher(user) ? `<p class="small"><a href="teacher.html">Open the teacher page →</a></p>` : ""}`);
   const inp = $("#code");
@@ -101,7 +127,36 @@ function stopAll() {
   unsub.forEach((f) => f()); unsub = [];
   Object.values(voteSubs).forEach((f) => f()); voteSubs = {};
   S = NOW = PROG = null; MY = {}; KEYS = {}; keyLoading = {}; pick = {}; sending = {}; selfPack = {};
+  stopNotes(); notesOn = false;
+  stopAway(); awayOn = false;
 }
+let awayOn = false;
+function nudge(secs) {
+  document.querySelectorAll(".away-nudge").forEach((x) => x.remove());
+  const d = document.createElement("div");
+  d.className = "away-nudge";
+  d.innerHTML = `<b>You left the lesson for ${awayText(secs)}.</b><span>Your teacher can see this.</span><button class="btn small" type="button">OK</button>`;
+  d.querySelector("button").onclick = () => d.remove();
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), 10000);
+}
+/** A name for the current slide, for notes: the deck slide's heading (if students can read it yet). */
+function slideTitle() {
+  if (!S) return "";
+  if (S.qs && S.qs.title) return S.qs.title;
+  if (NOW && NOW.pos === S.pos && NOW.html) {
+    const t = document.createElement("template"); t.innerHTML = NOW.html;
+    const h = t.content.querySelector("h1, h2, .title");
+    const txt = h ? h.textContent.replace(/\s+/g, " ").trim() : "";
+    if (txt && !/^[x0\W\s]+$/.test(txt)) return txt.slice(0, 120);   // not a scrambled (not yet shown) build
+  }
+  if (S.qs) return S.qs.type === "word" ? "One-word question" : "Question";
+  return "";
+}
+function followSlide() { if (notesOn && S && S.mode !== "self") { setSlide(S.pos, slideTitle()); setReview(S.review); } }
+// notes: live lessons only, not for the teacher's "Student view"
+let notesOn = false;
+app.addEventListener("click", (e) => { if (e.target.closest("#notesBtn")) toggleNotes(); });
 
 async function join(c) {
   stopAll();
@@ -128,11 +183,16 @@ async function join(c) {
   unsub.push(watch(`sessions/${c}`, (v) => {
     const first = !S;
     S = normS(v);
+    if (S && !PREVIEW && S.mode !== "self" && !notesOn) { notesOn = true; startNotes(c, user, S.lessonTitle, S.sessionId); }
+    if (S && notesOn) setNotesTitle(S.lessonTitle);
+    followSlide();
+    if (S && !PREVIEW && S.mode !== "self" && S.active && !awayOn) { awayOn = true; startAway(c, user.uid, nudge, () => Date.now() + offset); }
+    if (S && awayOn && !S.active) { stopAway(); awayOn = false; }
     if (!S) return showCode("This lesson was removed.");
     if (S.mode === "self") { if (first) startSelf(); else renderSelf(); return; }
     syncVotes(S.qs ? S.qs.ids : []); loadKeys(); render();
   }, () => showCode("Lost access to this lesson.")));
-  unsub.push(watch(`now/${c}`, (v) => { NOW = v; if (S && S.mode !== "self") render(); }));
+  unsub.push(watch(`now/${c}`, (v) => { NOW = v; followSlide(); if (S && S.mode !== "self") render(); }));
 }
 
 /* ---------------- my answers + keys ---------------- */
@@ -143,7 +203,8 @@ function syncVotes(ids) {
     voteSubs[vk] = watch(`votes/${code}/${vk}/${user.uid}`, (v) => { MY[vk] = v; loadKeys(); rerender(); });
   });
 }
-const canSeeKey = (vk) => MY[vk] && (S.mode === "self" || S.feedback === "instant" || (S.reveal && S.reveal[vk]));
+// live lessons: never while the question is still open — feedback comes when time is up (or on the reveal)
+const canSeeKey = (vk) => MY[vk] && (S.mode === "self" || (S.reveal && S.reveal[vk]) || (S.feedback === "instant" && !(S.open && S.open[vk])));
 function loadKeys() {
   if (!S) return;
   Object.keys(voteSubs).forEach((vk) => {
@@ -174,6 +235,7 @@ function header() {
     <span class="title">${esc(S ? S.lessonTitle : "")}</span><span class="spacer"></span>
     ${left != null ? `<span class="pill timer-pill ${left <= 5 ? "warn" : ""}" id="tleft">⏱ ${fmtSecs(left)}</span>` : ""}
     ${PREVIEW ? `<span class="pill">Student view</span>` : me && S.points !== false ? `<span class="pill score">★ ${me.p} · #${me.r}</span>` : ""}
+    ${S && S.active && notesOn ? notesButton() : ""}
     ${S && S.active && S.mode !== "self" ? `<span class="pill live">Live</span>` : ""}
     <span class="pill">${esc(code)}</span>
   </div>`;
@@ -189,12 +251,12 @@ setInterval(() => {
 
 /* ---------------- question rendering (live + self) ---------------- */
 function itemState(vk, open) {
-  const mine = MY[vk] || null, key = KEYS[vk];
+  const mine = MY[vk] || null, key = canSeeKey(vk) ? KEYS[vk] : null;
   const rev = S.reveal && S.reveal[vk];
   const correct = key && key.c ? key.c : rev && rev !== "*" ? rev : null;
   return {
     open, mine, correct, explain: key ? key.x : "", why: key && key.w, accept: key && key.acc, sending: !!sending[vk],
-    canChange: S.mode !== "self" && S.feedback === "reveal" && open,
+    canChange: S.mode !== "self" && open,
   };
 }
 
@@ -277,19 +339,21 @@ function render() {
   if (!S || S.mode === "self") return;
   const me = S.scores && S.scores[user.uid];
   if (!S.active) {
-    paint(`<div class="card stack" style="text-align:center"><h2>The lesson has ended</h2>${me && S.points !== false ? `<p>You scored <b>${me.p}</b> points · #${me.r}</p>` : ""}<p class="muted">Thanks for taking part.</p><button class="btn" id="again">Join another lesson</button></div>`, false);
+    if (notesOn) { toggleNotes(false); sendNotesAtEnd(() => S && !S.active && render()); }
+    paint(`<div class="card stack" style="text-align:center"><h2>The lesson has ended</h2>${me && S.points !== false ? `<p>You scored <b>${me.p}</b> points · #${me.r}</p>` : ""}<p class="muted">Thanks for taking part.</p>${notesOn ? endedNotesHtml() : ""}<button class="btn" id="again">Join another lesson</button></div>`, false);
     $("#again").onclick = () => showCode();
+    wireEnded();
     return;
   }
   if (S.board) {
     paint(`<div class="card stack"><div class="kicker">Leaderboard</div>${boardHtml(S.top)}${me ? `<p class="banner info">You: #${me.r} · ${me.p} points</p>` : ""}</div>`, false);
     return;
   }
-  const foot = `<p class="small muted" style="text-align:center;margin-top:.6rem">Slide ${S.pos + 1} of ${S.total} · this page follows your teacher's screen</p>`;
+  const foot = `<p class="small muted" style="text-align:center;margin-top:.6rem">Slide ${S.pos + 1} of ${S.total} · this page follows your teacher's screen · your teacher can see if you leave it</p>`;
   if (S.qs) {
     const qs = S.qs;
     const html = questionsHtml(qs.type, qs.round || 1, qs.ids, qs.items || {}, (vk) => !!(S.open && S.open[vk]), qs.title);
-    const waiting = !S.open && qs.ids.some((vk) => MY[vk] && !KEYS[vk] && !(S.reveal && S.reveal[vk]));
+    const waiting = S.feedback !== "instant" && !S.open && qs.ids.some((vk) => MY[vk] && !KEYS[vk] && !(S.reveal && S.reveal[vk]));
     paint(html + (waiting ? `<div class="banner info">Time's up — the answers come up on the board.</div>` : ""), false);
     wire();
     return;
@@ -314,6 +378,10 @@ async function startSelf() {
   selfPos = Math.min(PROG.pos || 0, Math.max(0, (S.total || 1) - 1));
   selfStep = PROG.step || 0;
   if (PROG.done) selfPos = selfOrder().length;
+  const sp = +params.get("s");   // "Open this slide" link from the notes email
+  if (sp > 0 && params.get("c") && params.get("c").toUpperCase() === code && !startSelf.jumped) {
+    startSelf.jumped = true; selfPos = Math.min(sp - 1, selfOrder().length - 1); selfStep = 0;
+  }
   renderSelf();
 }
 function slideData(i) {

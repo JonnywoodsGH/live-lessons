@@ -6,9 +6,10 @@ import { configured, onUser, signIn, isTeacher, watch, read } from "./fb.js";
 import { $, esc, joinUrl, shortJoinUrl, tally, hingeSlideHtml, cloudHtml, countWords, boardHtml, fmtSecs, normS } from "./ui.js";
 import * as L from "./session.js";
 import QR from "./qr.js";
+import { AWAY_MIN } from "./away.js";
 
 const app = $("#app");
-let CODE = null, S = null, NOW = null, PRES = {}, VOTES = {}, LESSON = null, ROSTER = {}, offset = 0;
+let CODE = null, S = null, NOW = null, PRES = {}, VOTES = {}, LESSON = null, ROSTER = {}, AWAY = {}, offset = 0;
 let subs = [];
 const deck = { frame: null, lesson: null, ready: false, state: { n: 0, step: 0 }, want: null, expect: null, sync: false, numPending: false };
 
@@ -23,10 +24,10 @@ else onUser((u) => {
 
 function follow(code) {
   subs.forEach((f) => f()); subs = [];
-  CODE = code; S = NOW = LESSON = null; PRES = {}; VOTES = {};
+  CODE = code; S = NOW = LESSON = null; PRES = {}; VOTES = {}; AWAY = {}; awayShown = 0;
   if (!code) return msg("No live lesson running.<br><span class='small'>Start one on the teacher page — this window will follow it.</span>");
   resetDeck();
-  app.innerHTML = `<div class="stage" id="stage"><div id="deckLayer" class="fill hidden"></div><div id="other" class="fill"></div><div id="ov" class="fill" style="pointer-events:none"></div>
+  app.innerHTML = `<div class="stage" id="stage"><div id="deckLayer" class="fill hidden"></div><div id="other" class="fill"></div><div id="ov" class="fill" style="pointer-events:none"></div><div id="awayBoard" class="away-board hidden"></div>
     <div id="devView" class="dev-view ${devOn ? "" : "hidden"}"><div class="dev-label">Student view</div><div class="dev-screen"><iframe title="What students see" src="index.html?preview=1"></iframe></div></div></div>`;
   fitDev();
   subs.push(watch(`sessions/${code}`, async (v) => {
@@ -39,9 +40,34 @@ function follow(code) {
   subs.push(watch(`presence/${code}`, (v) => { PRES = v || {}; renderOverlay(); }));
   subs.push(watch(`votes/${code}`, (v) => { VOTES = v || {}; render(); schedulePublish(); }));
   subs.push(watch("roster", (v) => { ROSTER = v || {}; schedulePublish(); }));
+  subs.push(watch(`away/${code}`, (v) => { AWAY = v || {}; paintAway(); }));
   subs.push(watch(".info/serverTimeOffset", (v) => (offset = +v || 0)));
-  const iv = setInterval(() => { if (S && CODE === code) { L.tick(code, S, PRES, offset); paintClock(); } }, 500);
+  const iv = setInterval(() => { if (S && CODE === code) { L.tick(code, S, PRES, offset); paintClock(); paintAway(); } }, 500);
   subs.push(() => clearInterval(iv));
+}
+/* ---- "Left the lesson page" on the board: a count only, never names (teacher option) ---- */
+let awayShown = 0, audio = null;
+function paintAway() {
+  const el = document.getElementById("awayBoard"); if (!el) return;
+  const now = Date.now() + offset;
+  const n = S && S.awayBoard && S.active ? Object.values(AWAY).filter((a) => a.a && (now - a.a) / 1000 >= AWAY_MIN).length : 0;
+  el.classList.toggle("hidden", !n);
+  if (n) el.textContent = `👀 ${n} student${n === 1 ? " has" : "s have"} left the lesson page`;
+  if (n > awayShown) chime();
+  awayShown = n;
+}
+function chime() {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === "suspended") audio.resume();
+    const t = audio.currentTime;
+    [660, 880].forEach((f, i) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0, t + i * 0.18); g.gain.linearRampToValueAtTime(0.12, t + i * 0.18 + 0.03); g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.18 + 0.5);
+      o.connect(g).connect(audio.destination); o.start(t + i * 0.18); o.stop(t + i * 0.18 + 0.55);
+    });
+  } catch (e) {}
 }
 /* ---- "Student view": a phone-sized mirror of what devices show (D or the bar) ---- */
 let devOn = false;
@@ -127,6 +153,9 @@ function renderOverlay() {
     const vks = S.qs.ids, open = !!(S.open && S.open[vks[0]]);
     const done = Object.keys(PRES).filter((u) => vks.every((vk) => VOTES[vk] && VOTES[vk][u])).length;
     html += `<div class="q-status ${open ? "live" : ""}"><span id="pclock"></span><span>${open ? "Answer on your device" : "Closed"} · ${done}${joined ? " / " + joined : ""} done</span></div>`;
+    // the deck's own timer on a question slide shows the live countdown (the one students see)
+    const tbox = S.timer !== false && S.qs.openedAt ? deckTimerBox() : "";
+    if (tbox) html += `<div class="deck-clock" id="dclock" style="${tbox}"></div>`;
     // one-word question on a deck slide: the cloud floats over the slide
     if (S.qs.type === "word") {
       const vk = vks[0], q = LESSON.questions[L.baseId(vk)] || {};
@@ -143,16 +172,65 @@ function wordAreaStyle() {
   try {
     const d = deck.frame && deck.frame.contentDocument, a = d && d.querySelector(".slide.active .wq-area");
     if (!a) return "";
-    const b = a.getBoundingClientRect(), f = deck.frame.getBoundingClientRect(), st = $("#stage").getBoundingClientRect();
-    return `left:${b.left + f.left - st.left}px;top:${b.top + f.top - st.top}px;width:${b.width}px;height:${b.height}px;right:auto;bottom:auto`;
+    const m = onStage(a.getBoundingClientRect());
+    return `left:${m.left}px;top:${m.top}px;width:${m.width}px;height:${m.height}px;right:auto;bottom:auto`;
   } catch (e) { return ""; }
 }
 function paintClock() {
-  const el = document.getElementById("pclock"); if (!el) return;
   const left = L.secondsLeft(S, offset);
-  el.textContent = left == null ? "" : `⏱ ${fmtSecs(left)}  `;
-  el.classList.toggle("warn", left != null && left <= 5);
+  const el = document.getElementById("pclock");
+  if (el) { el.textContent = left == null ? "" : `⏱ ${fmtSecs(left)}  `; el.classList.toggle("warn", left != null && left <= 5); }
+  const dc = document.getElementById("dclock");
+  if (dc) { dc.textContent = fmtSecs(left == null ? 0 : left); dc.classList.toggle("warn", left == null || left <= 5); }
+  markDeckTimer(!!dc);
 }
+/** A box measured inside the deck → the same box on the stage (allowing for the zoom below). */
+function onStage(b) {
+  const f = deck.frame.getBoundingClientRect(), st = $("#stage").getBoundingClientRect(), k = deck.zoom || 1;
+  return { left: f.left - st.left + b.left * k, top: f.top - st.top + b.top * k, width: b.width * k, height: b.height * k };
+}
+/** Fill the screen: the deck scales its slide to fit with some margin of its own — zoom the frame so the
+ *  slide itself reaches the edges of the projector (keeping its shape). */
+function fitDeck() {
+  const f = deck.frame; if (!f || !deck.ready) return;
+  try {
+    const d = f.contentDocument, sec = d && d.querySelector(".slide.active"); if (!sec) return;
+    const box = (sec.parentElement && sec.parentElement !== d.body ? sec.parentElement : sec).getBoundingClientRect();
+    const W = f.clientWidth, H = f.clientHeight;
+    if (!box.width || !box.height || !W || !H) return;
+    const prev = deck.zoom || 1, k = Math.min(W / box.width, H / box.height);
+    // box is measured in the frame's own pixels, so it doesn't change with our zoom
+    if (k < 1.02 || k > 2) { if (prev !== 1) { f.style.transform = ""; deck.zoom = 1; } return; }
+    const tx = W / 2 - k * (box.left + box.width / 2), ty = H / 2 - k * (box.top + box.height / 2);
+    f.style.transformOrigin = "0 0";
+    f.style.transform = `translate(${tx}px,${ty}px) scale(${k})`;
+    deck.zoom = k;
+  } catch (e) {}
+}
+
+/** Where the deck's own timer sits on the current slide (so the live countdown can cover it). */
+function deckTimerBox() {
+  try {
+    const d = deck.frame && deck.frame.contentDocument, a = d && d.querySelector(".slide.active .timer");
+    if (!a) return "";
+    const m = onStage(a.getBoundingClientRect());
+    if (!m.width || !m.height) return "";
+    return `left:${m.left}px;top:${m.top}px;width:${m.width}px;height:${m.height}px;font-size:${Math.round(m.height * 0.55)}px`;
+  } catch (e) { return ""; }
+}
+/** Hide the deck's own (unlinked) timer while the live countdown covers it. */
+function markDeckTimer(on) {
+  try {
+    const d = deck.frame && deck.frame.contentDocument; if (!d) return;
+    if (!d.getElementById("ll-timer-style")) {
+      const st = d.createElement("style"); st.id = "ll-timer-style";
+      st.textContent = "html.ll-live-timer .slide.active .timer{visibility:hidden!important}";
+      d.head.appendChild(st);
+    }
+    d.documentElement.classList.toggle("ll-live-timer", on);
+  } catch (e) {}
+}
+addEventListener("resize", () => { if (lastMode !== "html") return; fitDeck(); setTimeout(() => { fitDeck(); if (S) renderOverlay(); }, 300); });
 function resultsRows() {
   return S.qs.ids.map((vk) => {
     const q = LESSON.questions[L.baseId(vk)] || {}, item = S.qs.items[vk] || {};
@@ -182,6 +260,17 @@ function paintAsHinge(sec) {
   }
 }
 
+/** The original deck marks the right hinge option (.right) — the whole class can see the TV, so that mark
+ *  only goes back on once the answer is revealed (A, or the deck's answer build, which also closes voting). */
+function hideRightOption(sec) {
+  if (!sec.classList.contains("hinge")) return;
+  const opts = [...sec.querySelectorAll(".hopt")];
+  opts.forEach((o) => { if (o.classList.contains("right")) o.dataset.llRight = "1"; });
+  const it = LESSON && S.qs && LESSON.order[S.pos], vk = S.qs && S.qs.ids[0];
+  const shown = !!(it && it.t === "html" && it.n === deck.state.n && S.reveal && S.reveal[vk]);   // revealed, for THIS slide
+  opts.forEach((o) => o.classList.toggle("right", shown && o.dataset.llRight === "1"));
+}
+
 /** Results drawn onto the deck slide itself: a badge on each card / option. */
 let deckResultsDrawn = false;
 function paintDeckResults() {
@@ -190,6 +279,7 @@ function paintDeckResults() {
   const d = deck.frame.contentDocument; if (!d) return;
   d.querySelectorAll(".ll-badge").forEach((b) => b.remove());
   const sec = d.querySelector(".slide.active"); if (!sec) return;
+  hideRightOption(sec);
   if (S.qs && S.qs.type === "mcq" && sec.classList.contains("hinge") && sec.querySelector(".hopt .tc")) {
     paintAsHinge(sec);   // the deck's own tally + verdict, filled live
     deckResultsDrawn = true;
@@ -229,7 +319,7 @@ function paintDeckResults() {
 
 function resetDeck() {
   if (deck.frame) deck.frame.remove();
-  Object.assign(deck, { frame: null, lesson: null, ready: false, state: { n: 0, step: 0 }, want: null, expect: null });
+  Object.assign(deck, { zoom: 1, frame: null, lesson: null, ready: false, state: { n: 0, step: 0 }, want: null, expect: null });
 }
 
 async function ensureDeck(lessonId) {
@@ -243,7 +333,7 @@ async function ensureDeck(lessonId) {
   // your own deck, so it runs with full access to its frame (timers, sound, fullscreen)
   f.setAttribute("sandbox", "allow-scripts allow-same-origin");
   f.setAttribute("allow", "fullscreen; autoplay");
-  f.addEventListener("load", () => { attach(f); deck.ready = true; render(); focusDeck(); }, { once: true });
+  f.addEventListener("load", () => { attach(f); deck.ready = true; render(); focusDeck(); setTimeout(() => { fitDeck(); renderOverlay(); }, 300); }, { once: true });
   f.srcdoc = html || "<p>Deck not found</p>";
   $("#deckLayer").appendChild(f);
   deck.frame = f;
@@ -316,6 +406,8 @@ function deckGoto(n, st) {
 
 function deckMoved(n, st) {
   deck.state = { n, step: st };
+  try { const sec = deck.frame.contentDocument.querySelector(".slide.active"); if (sec && S) hideRightOption(sec); } catch (e) {}
+  clearTimeout(deck.reT); deck.reT = setTimeout(() => { fitDeck(); if (S && LESSON) { paintDeckResults(); renderOverlay(); } }, 450);   // re-place the live clock once the slide has settled
   if (deck.sync) return;                                                    // we asked for this
   if (deck.expect && deck.expect.n === n && deck.expect.step === st) { deck.expect = null; return; }
   // the teacher moved the deck itself (slide menu, typed number, swipe, R to restart builds) → follow it

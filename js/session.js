@@ -69,7 +69,7 @@ function publicItem(q, round) {
   }
   return p;
 }
-/** What a student may see after answering (instant feedback) or after the reveal. */
+/** What a student may see once the question has closed (automatic feedback) or after the reveal. */
 async function keyFor(lesson, q) {
   const k = { c: q.correct || "", x: q.explain || "" };
   if (q.why && Object.keys(q.why).length) k.w = q.why;   // why each wrong option is wrong (AS-style hinge)
@@ -254,8 +254,10 @@ export function secondsLeft(s, offset = 0) {
 
 export async function hideWord(code, vk, k, hidden) { await set(r(`sessions/${code}/hidden/${vk}/${encodeKey(k)}`), hidden ? true : null); }
 
-export async function endSession(code) {
+/** review: code of a self-paced copy of the lesson, linked from students' notes emails. */
+export async function endSession(code, review) {
   const u = {};
+  if (review) u[`sessions/${code}/review`] = review;
   u[`sessions/${code}/active`] = false;
   u[`sessions/${code}/endedAt`] = serverTimestamp();
   u[`sessions/${code}/open`] = null;
@@ -271,6 +273,7 @@ export function computeScores(lesson, s, votes, roster, progress) {
   Object.keys(votes || {}).forEach((vk) => {
     const q = lesson.questions[baseId(vk)];
     if (!q) return;
+    if (s.mode !== "self" && s.open && s.open[vk]) return;   // a jump in points would give the answer away — count it once the question closes
     Object.entries(votes[vk] || {}).forEach(([uid, v]) => {
       const me = (by[uid] = by[uid] || { p: 0, right: 0, done: 0 });
       me.done++;
