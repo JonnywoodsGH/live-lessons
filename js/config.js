@@ -21,9 +21,10 @@ export const firebaseConfig = {
 export const TEACHER_EMAILS = ["v.johnwa@vinschool.edu.vn"];
 
 // 3. The part after @ in the Google accounts that can join as students. One domain, or a list.
-//    vinschool.edu.vn is in for now so other teachers can try it as students
-//    (they can't run lessons — only TEACHER_EMAILS can). Remove it after testing.
-export const SCHOOL_DOMAIN = ["stu.vinschool.edu.vn", "vinschool.edu.vn"];
+//    "*" = ANY Google account can join as a student (testing only). Teachers are still only
+//    TEACHER_EMAILS. After testing, set it back to e.g. ["stu.vinschool.edu.vn"] and
+//    re-publish the rules from setup.html.
+export const SCHOOL_DOMAIN = ["*"];
 
 // 4. Students' notes by email (optional). Paste the "Web app URL" from Google Apps Script here —
 //    setup.html has the script and the steps. Leave it "" and students can still take notes and

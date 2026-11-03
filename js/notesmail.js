@@ -18,7 +18,7 @@ function doPost(e) {
     const who = lookup_(String(d.idToken || ""));
     if (!who || !who.email || who.emailVerified !== true) return out_({ ok: false, error: "Not signed in" });
     const email = String(who.email).toLowerCase();
-    if (!DOMAINS.some(function (x) { return email.slice(-(x.length + 1)) === "@" + x; })) return out_({ ok: false, error: "Not a school account" });
+    if (DOMAINS.indexOf("*") < 0 && !DOMAINS.some(function (x) { return email.slice(-(x.length + 1)) === "@" + x; })) return out_({ ok: false, error: "Not a school account" });
     // notes come one per slide: [{slide, title, text, link}]
     var left = 8000;
     const list = (Array.isArray(d.entries) ? d.entries : []).slice(0, 200).map(function (x) {
