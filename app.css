@@ -94,6 +94,23 @@ body.present { background: #111; overflow: hidden; }
 .s-top .title { font-weight: 700; font-size: .95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .s-main { max-width: 900px; margin: 0 auto; padding: 16px; }
 .s-slide { width: 100%; border-radius: 10px; border: 1px solid var(--line); background: #fff; display: block; box-shadow: var(--shadow); }
+/* slides: as big as the screen allows (header ~52px, footer line ~36px), centred */
+.s-main.wide { max-width: none; padding: 8px 12px; position: relative; }
+.s-main.wide #deckHost, .s-main.wide .s-slide { width: min(100%, calc((100dvh - 110px) * 16 / 9)); margin: 0 auto; }
+.s-main.wide #deckHost { position: relative; }
+.fs-btn { position: absolute; right: 8px; top: 8px; z-index: 3; width: 40px; height: 40px; border-radius: 10px; border: 0; background: rgba(17,17,17,.55); color: #fff; font-size: 1.2rem; cursor: pointer; }
+.s-main:fullscreen { background: #0e1b2a; display: flex; flex-direction: column; justify-content: center; padding: 0; }
+.s-main:fullscreen #main, .s-main:fullscreen #below { display: none; }
+.s-main:fullscreen #deckHost, .s-main:fullscreen .s-slide { width: min(100vw, calc(100vh * 16 / 9)); margin: 0 auto; }
+.s-main:fullscreen .deckframe, .s-main:fullscreen .s-slide { border-radius: 0; border: 0; }
+.s-main:fullscreen #main:has(.s-slide) { display: block; }
+/* phone on its side: slimmer header, no footer line, so the slide gets the height */
+@media (orientation: landscape) and (max-height: 500px) {
+  .s-top { padding: .25rem 12px; }
+  .s-main.wide { padding: 4px 8px; }
+  .s-main.wide #deckHost, .s-main.wide .s-slide { width: min(100%, calc((100dvh - 50px) * 16 / 9)); }
+  .s-main.wide #below { display: none; }
+}
 .s-q h1 { font-size: 1.45rem; line-height: 1.25; }
 .s-q .code { font: 600 1.1rem/1.4 var(--mono); letter-spacing: .04em; max-width: 100%; overflow-x: auto; background: var(--blue-soft); border-radius: 10px; padding: .6rem .9rem; display: inline-block; white-space: pre-wrap; }
 .s-opts { display: grid; gap: .6rem; margin-top: 1rem; }
@@ -175,6 +192,14 @@ body.present.hud-awake .corner-code { opacity: 1; }
 .fb.ok { color: var(--ok); } .fb.bad { color: var(--bad); } .fb.muted { color: var(--muted); font-weight: 500; }
 .wform { display: flex; gap: .5rem; margin-top: .7rem; }
 .wform input { font-size: 1.2rem; font-weight: 600; }
+.notes-pill { cursor: pointer; border: 0; font-family: inherit; }
+.notes-pill.on { background: var(--ink); color: #fff; }
+.notes-dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; pointer-events: none; }
+.notes-dock.open { pointer-events: auto; }
+.notes-sheet { max-width: 720px; margin: 0 auto; background: var(--card, #fff); border: 1px solid var(--line); border-bottom: 0; border-radius: 14px 14px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.15); padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); display: grid; gap: 8px; }
+.notes-sheet textarea, .notes-copy { width: 100%; box-sizing: border-box; min-height: 30vh; max-height: 45vh; resize: vertical; font: 1rem/1.45 var(--sans, sans-serif); padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 10px; }
+.notes-copy { min-height: 120px; text-align: left; }
+body:has(.notes-dock.open) .s-main { padding-bottom: 46vh; }
 .timer-pill { background: var(--accent-soft); color: var(--accent); font-variant-numeric: tabular-nums; }
 .timer-pill.warn { background: var(--bad); color: #fff; }
 .pill.score { background: #fff4cc; color: #8a6200; }
@@ -212,7 +237,7 @@ body.present.hud-awake .corner-code { opacity: 1; }
 .q-status { position: absolute; top: 1.2cqw; right: 1.4cqw; z-index: 4; background: rgba(22,50,79,.92); color: #fff; font: 700 1.35cqw var(--sans); padding: .6cqw 1.2cqw; border-radius: 99px; display: flex; gap: .4cqw; }
 .q-status.live { background: rgba(28,122,85,.95); }
 .q-status #pclock.warn { color: #ffd2c2; }
-.deck-clock { position: absolute; z-index: 4; display: flex; align-items: center; justify-content: center; box-sizing: border-box; background: #16324F; color: #fff; border-radius: 99px; font-family: var(--mono); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.deck-clock { position: absolute; z-index: 4; display: flex; align-items: center; justify-content: center; box-sizing: border-box; background: #16324F; color: #fff; border-radius: 10px; font-family: var(--mono); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
 .deck-clock.warn { background: #B4372B; }
 .res-panel { position: absolute; right: 2cqw; bottom: 5cqw; width: 38cqw; background: rgba(255,255,255,.97); border-radius: 1.2cqw; box-shadow: 0 1cqw 4cqw rgba(0,0,0,.2); padding: 1.2cqw 1.6cqw; font-size: 1.25cqw; z-index: 4; }
 .res-panel .rr { display: grid; grid-template-columns: 1.6cqw 1fr 10cqw 3.5cqw; gap: .8cqw; align-items: center; padding: .25cqw 0; }

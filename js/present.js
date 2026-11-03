@@ -146,8 +146,8 @@ function wordAreaStyle() {
   try {
     const d = deck.frame && deck.frame.contentDocument, a = d && d.querySelector(".slide.active .wq-area");
     if (!a) return "";
-    const b = a.getBoundingClientRect(), f = deck.frame.getBoundingClientRect(), st = $("#stage").getBoundingClientRect();
-    return `left:${b.left + f.left - st.left}px;top:${b.top + f.top - st.top}px;width:${b.width}px;height:${b.height}px;right:auto;bottom:auto`;
+    const m = onStage(a.getBoundingClientRect());
+    return `left:${m.left}px;top:${m.top}px;width:${m.width}px;height:${m.height}px;right:auto;bottom:auto`;
   } catch (e) { return ""; }
 }
 function paintClock() {
@@ -158,14 +158,38 @@ function paintClock() {
   if (dc) { dc.textContent = fmtSecs(left == null ? 0 : left); dc.classList.toggle("warn", left == null || left <= 5); }
   markDeckTimer(!!dc);
 }
+/** A box measured inside the deck → the same box on the stage (allowing for the zoom below). */
+function onStage(b) {
+  const f = deck.frame.getBoundingClientRect(), st = $("#stage").getBoundingClientRect(), k = deck.zoom || 1;
+  return { left: f.left - st.left + b.left * k, top: f.top - st.top + b.top * k, width: b.width * k, height: b.height * k };
+}
+/** Fill the screen: the deck scales its slide to fit with some margin of its own — zoom the frame so the
+ *  slide itself reaches the edges of the projector (keeping its shape). */
+function fitDeck() {
+  const f = deck.frame; if (!f || !deck.ready) return;
+  try {
+    const d = f.contentDocument, sec = d && d.querySelector(".slide.active"); if (!sec) return;
+    const box = (sec.parentElement && sec.parentElement !== d.body ? sec.parentElement : sec).getBoundingClientRect();
+    const W = f.clientWidth, H = f.clientHeight;
+    if (!box.width || !box.height || !W || !H) return;
+    const prev = deck.zoom || 1, k = Math.min(W / box.width, H / box.height);
+    // box is measured in the frame's own pixels, so it doesn't change with our zoom
+    if (k < 1.02 || k > 2) { if (prev !== 1) { f.style.transform = ""; deck.zoom = 1; } return; }
+    const tx = W / 2 - k * (box.left + box.width / 2), ty = H / 2 - k * (box.top + box.height / 2);
+    f.style.transformOrigin = "0 0";
+    f.style.transform = `translate(${tx}px,${ty}px) scale(${k})`;
+    deck.zoom = k;
+  } catch (e) {}
+}
+
 /** Where the deck's own timer sits on the current slide (so the live countdown can cover it). */
 function deckTimerBox() {
   try {
     const d = deck.frame && deck.frame.contentDocument, a = d && d.querySelector(".slide.active .timer");
     if (!a) return "";
-    const b = a.getBoundingClientRect(), f = deck.frame.getBoundingClientRect(), st = $("#stage").getBoundingClientRect();
-    if (!b.width || !b.height) return "";
-    return `left:${b.left + f.left - st.left}px;top:${b.top + f.top - st.top}px;width:${b.width}px;height:${b.height}px;font-size:${Math.round(b.height * 0.55)}px`;
+    const m = onStage(a.getBoundingClientRect());
+    if (!m.width || !m.height) return "";
+    return `left:${m.left}px;top:${m.top}px;width:${m.width}px;height:${m.height}px;font-size:${Math.round(m.height * 0.55)}px`;
   } catch (e) { return ""; }
 }
 /** Hide the deck's own (unlinked) timer while the live countdown covers it. */
@@ -180,7 +204,7 @@ function markDeckTimer(on) {
     d.documentElement.classList.toggle("ll-live-timer", on);
   } catch (e) {}
 }
-addEventListener("resize", () => { if (S && S.qs && lastMode === "html") renderOverlay(); });
+addEventListener("resize", () => { if (lastMode !== "html") return; fitDeck(); setTimeout(() => { fitDeck(); if (S) renderOverlay(); }, 300); });
 function resultsRows() {
   return S.qs.ids.map((vk) => {
     const q = LESSON.questions[L.baseId(vk)] || {}, item = S.qs.items[vk] || {};
@@ -269,7 +293,7 @@ function paintDeckResults() {
 
 function resetDeck() {
   if (deck.frame) deck.frame.remove();
-  Object.assign(deck, { frame: null, lesson: null, ready: false, state: { n: 0, step: 0 }, want: null, expect: null });
+  Object.assign(deck, { zoom: 1, frame: null, lesson: null, ready: false, state: { n: 0, step: 0 }, want: null, expect: null });
 }
 
 async function ensureDeck(lessonId) {
@@ -283,7 +307,7 @@ async function ensureDeck(lessonId) {
   // your own deck, so it runs with full access to its frame (timers, sound, fullscreen)
   f.setAttribute("sandbox", "allow-scripts allow-same-origin");
   f.setAttribute("allow", "fullscreen; autoplay");
-  f.addEventListener("load", () => { attach(f); deck.ready = true; render(); focusDeck(); }, { once: true });
+  f.addEventListener("load", () => { attach(f); deck.ready = true; render(); focusDeck(); setTimeout(() => { fitDeck(); renderOverlay(); }, 300); }, { once: true });
   f.srcdoc = html || "<p>Deck not found</p>";
   $("#deckLayer").appendChild(f);
   deck.frame = f;
@@ -357,7 +381,7 @@ function deckGoto(n, st) {
 function deckMoved(n, st) {
   deck.state = { n, step: st };
   try { const sec = deck.frame.contentDocument.querySelector(".slide.active"); if (sec && S) hideRightOption(sec); } catch (e) {}
-  clearTimeout(deck.reT); deck.reT = setTimeout(() => { if (S && LESSON) { paintDeckResults(); renderOverlay(); } }, 450);   // re-place the live clock once the slide has settled
+  clearTimeout(deck.reT); deck.reT = setTimeout(() => { fitDeck(); if (S && LESSON) { paintDeckResults(); renderOverlay(); } }, 450);   // re-place the live clock once the slide has settled
   if (deck.sync) return;                                                    // we asked for this
   if (deck.expect && deck.expect.n === n && deck.expect.step === st) { deck.expect = null; return; }
   // the teacher moved the deck itself (slide menu, typed number, swipe, R to restart builds) → follow it

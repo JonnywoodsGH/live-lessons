@@ -17,14 +17,39 @@
     <div class="row"><button class="btn primary" id="copy">Copy rules</button><span class="small muted" id="copied"></span></div>
     <pre class="rules" id="rules"></pre>
   </section>
+  <section class="card stack">
+    <div class="kicker">Optional · once</div>
+    <h2>Email students their notes</h2>
+    <p class="muted small">Students can type short notes during a live lesson (<b>✎ Notes</b> at the top of their screen). When you end the lesson, each student is emailed their own notes from your school Gmail. Nobody else sees them, you included. This needs a small Google Apps Script, which takes about 5 minutes to set up:</p>
+    <ol class="small">
+      <li>Signed in as <b id="tEmail"></b>, open <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com → New project</a>. Name it <b>Live Lessons notes</b>.</li>
+      <li>Delete what's in <b>Code.gs</b>, press <b>Copy script</b> below and paste it in. Press 💾 Save.</li>
+      <li>Press <b>Deploy → New deployment</b> → ⚙ <b>Web app</b>. Set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>. Press <b>Deploy</b>, then <b>Authorize access</b> and allow it. If Google says the app isn't verified, press <b>Advanced → Go to Live Lessons notes</b>. It's your own script.</li>
+      <li>Copy the <b>Web app URL</b> (it ends in <code>/exec</code>). Paste it into <code>js/config.js</code> as <code>NOTES_EMAIL_URL</code>, or send it to Claude to do it.</li>
+    </ol>
+    <p class="small" id="mailState"></p>
+    <div class="row"><button class="btn primary" id="copyGs">Copy script</button><span class="small muted" id="copiedGs"></span></div>
+    <pre class="rules" id="gs" style="max-height:220px"></pre>
+    <p class="small muted">The script only emails the signed-in student's own school address (it checks their Google sign-in), and at most 20 emails per student a day. If you ever change the school domain in config.js, copy and paste the script again, then use <b>Deploy → Manage deployments → ✏ → New version</b>.</p>
+  </section>
   <section class="card stack small">
     <h3>Pages</h3>
     <p><a href="teacher.html">teacher.html</a> — your control page (laptop or phone) · <a href="present.html">present.html</a> — the projector · <a href="./">index.html</a> — the student page (the link the QR code opens)</p>
   </section>
 </main>
 <script type="module">
-  import { firebaseConfig, TEACHER_EMAILS, SCHOOL_DOMAIN } from "./js/config.js";
+  import { firebaseConfig, TEACHER_EMAILS, SCHOOL_DOMAIN, NOTES_EMAIL_URL } from "./js/config.js";
   import { buildRules } from "./js/rules.js";
+  import { notesScript } from "./js/notesmail.js";
+  const gs = notesScript(firebaseConfig.apiKey, SCHOOL_DOMAIN);
+  document.getElementById("gs").textContent = gs;
+  document.getElementById("tEmail").textContent = TEACHER_EMAILS[0] || "your school account";
+  document.getElementById("mailState").innerHTML = NOTES_EMAIL_URL
+    ? "✅ Notes email is switched on." : "❌ Not set up yet: students can take notes and copy them at the end, but nothing is emailed.";
+  document.getElementById("copyGs").onclick = async () => {
+    try { await navigator.clipboard.writeText(gs); document.getElementById("copiedGs").textContent = "Copied. Now paste it into Code.gs."; }
+    catch (e) { document.getElementById("copiedGs").textContent = "Select the text below and copy it by hand."; }
+  };
   const ok = (b) => b ? "✅" : "❌";
   const cfgOk = !/PASTE_/.test(JSON.stringify(firebaseConfig));
   const urlOk = /^https:\/\/.+(firebaseio\.com|firebasedatabase\.app)\/?$/.test(firebaseConfig.databaseURL || "");

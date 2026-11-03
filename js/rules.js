@@ -3,7 +3,9 @@
 //  • Students (school domain) — read the session they joined + the current slide; write only their own
 //    answer, only while that question is open (or any time in a student-paced assignment, once);
 //    read the correct answer only AFTER they have answered AND the question has closed (automatic feedback),
-//    in a student-paced assignment, or after you reveal it. They never see other students' answers, the lesson file or slides not yet shown.
+//    in a student-paced assignment, or after you reveal it. They never see other students' answers,
+//    the lesson file or slides not yet shown.
+//  • Students' lesson notes are private to each student (the teacher can't read them).
 export function buildRules(teacherEmails, schoolDomain) {
   const q = (s) => "'" + String(s).toLowerCase().replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
   const T = "(auth != null && auth.token.email_verified == true && (" +
@@ -60,6 +62,20 @@ export function buildRules(teacherEmails, schoolDomain) {
             t: { ".validate": "newData.val() == now" },
             done: { ".validate": "newData.isBoolean()" },
             seen: { $vk: { ".validate": "(!data.exists() && newData.val() == now) || data.val() == newData.val()" } },
+            $other: { ".validate": false },
+          },
+        },
+      },
+      // students' own lesson notes: only that student can read or write them — not the teacher.
+      // Written while the lesson is running; deleted by the student's page once emailed.
+      notes: {
+        $code: {
+          $uid: {
+            ".read": "auth != null && auth.uid == $uid",
+            ".write": `${S} && auth.uid == $uid && (${active} || !newData.exists())`,
+            ".validate": "newData.hasChildren(['x', 't'])",
+            x: { ".validate": "newData.isString() && newData.val().length <= 5000" },
+            t: { ".validate": "newData.val() == now" },
             $other: { ".validate": false },
           },
         },

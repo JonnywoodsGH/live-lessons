@@ -5,6 +5,7 @@ import { configured, onUser, signIn, logOut, watch, read, r, set, update, onDisc
 import { SCHOOL_DOMAIN } from "./config.js";
 import { $, esc, isCodeLike, cloudHtml, boardHtml, fmtSecs, normS } from "./ui.js";
 import { deckView } from "./deckview.js";
+import { startNotes, stopNotes, setNotesTitle, notesButton, paintDock, toggleNotes, sendNotesAtEnd, endedNotesHtml, wireEnded } from "./notes.js";
 
 const app = $("#app");
 const CONF = [[1, "Guessing"], [2, "Not sure"], [3, "Fairly sure"], [4, "Certain"]];
@@ -26,13 +27,36 @@ function screen(html) { mounted = false; app.innerHTML = `<div class="center"><d
 let mounted = false, deck = null, deckLesson = null, deckLoading = null;
 function paint(mainHtml, showDeck, below = "") {
   if (!mounted || !document.getElementById("main")) {
-    app.innerHTML = `<div id="hdr"></div><div class="s-main"><div id="main"></div><div id="deckHost" class="hidden"></div><div id="below"></div></div>`;
+    app.innerHTML = `<div id="hdr"></div><div class="s-main"><div id="main"></div><div id="deckHost" class="hidden"></div><div id="below"></div></div><div id="notesDock"></div>`;
     mounted = true; deck = null; deckLesson = null; deckLoading = null;
+    paintDock();
   }
   $("#hdr").innerHTML = header();
   $("#deckHost").classList.toggle("hidden", !showDeck);
+  // slides use the whole screen; questions and messages stay in a readable column
+  const wide = showDeck || /class="s-slide"/.test(mainHtml);
+  app.querySelector(".s-main").classList.toggle("wide", wide);
+  fsButton(wide);
   $("#main").innerHTML = mainHtml;
   $("#below").innerHTML = below;
+}
+/** ⛶ on the slide: full screen on devices that allow it (laptops, Android, iPad — not iPhone). */
+function fsButton(on) {
+  let b = document.getElementById("fsBtn");
+  const can = document.fullscreenEnabled || document.webkitFullscreenEnabled;
+  if (!on && (document.fullscreenElement || document.webkitFullscreenElement)) (document.exitFullscreen || document.webkitExitFullscreen).call(document);   // a question: back to normal
+  const host = document.getElementById("deckHost");
+  if (!on || !can || !host || host.classList.contains("hidden")) { if (b) b.remove(); return; }
+  if (b && b.parentElement === host) return;
+  if (b) b.remove();
+  b = document.createElement("button");
+  b.id = "fsBtn"; b.className = "fs-btn"; b.type = "button"; b.title = "Full screen"; b.textContent = "⛶";
+  b.onclick = () => {
+    const box = app.querySelector(".s-main");
+    if (document.fullscreenElement || document.webkitFullscreenElement) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    else (box.requestFullscreen || box.webkitRequestFullscreen).call(box).catch?.(() => {});
+  };
+  host.appendChild(b);
 }
 async function ensureDeck(lessonId) {
   if (deck && deckLesson === lessonId) return deck;
@@ -101,7 +125,11 @@ function stopAll() {
   unsub.forEach((f) => f()); unsub = [];
   Object.values(voteSubs).forEach((f) => f()); voteSubs = {};
   S = NOW = PROG = null; MY = {}; KEYS = {}; keyLoading = {}; pick = {}; sending = {}; selfPack = {};
+  stopNotes(); notesOn = false;
 }
+// notes: live lessons only, not for the teacher's "Student view"
+let notesOn = false;
+app.addEventListener("click", (e) => { if (e.target.closest("#notesBtn")) toggleNotes(); });
 
 async function join(c) {
   stopAll();
@@ -128,6 +156,8 @@ async function join(c) {
   unsub.push(watch(`sessions/${c}`, (v) => {
     const first = !S;
     S = normS(v);
+    if (S && !PREVIEW && S.mode !== "self" && !notesOn) { notesOn = true; startNotes(c, user, S.lessonTitle, S.sessionId); }
+    if (S && notesOn) setNotesTitle(S.lessonTitle);
     if (!S) return showCode("This lesson was removed.");
     if (S.mode === "self") { if (first) startSelf(); else renderSelf(); return; }
     syncVotes(S.qs ? S.qs.ids : []); loadKeys(); render();
@@ -175,6 +205,7 @@ function header() {
     <span class="title">${esc(S ? S.lessonTitle : "")}</span><span class="spacer"></span>
     ${left != null ? `<span class="pill timer-pill ${left <= 5 ? "warn" : ""}" id="tleft">⏱ ${fmtSecs(left)}</span>` : ""}
     ${PREVIEW ? `<span class="pill">Student view</span>` : me && S.points !== false ? `<span class="pill score">★ ${me.p} · #${me.r}</span>` : ""}
+    ${S && S.active && notesOn ? notesButton() : ""}
     ${S && S.active && S.mode !== "self" ? `<span class="pill live">Live</span>` : ""}
     <span class="pill">${esc(code)}</span>
   </div>`;
@@ -278,8 +309,10 @@ function render() {
   if (!S || S.mode === "self") return;
   const me = S.scores && S.scores[user.uid];
   if (!S.active) {
-    paint(`<div class="card stack" style="text-align:center"><h2>The lesson has ended</h2>${me && S.points !== false ? `<p>You scored <b>${me.p}</b> points · #${me.r}</p>` : ""}<p class="muted">Thanks for taking part.</p><button class="btn" id="again">Join another lesson</button></div>`, false);
+    if (notesOn) { toggleNotes(false); sendNotesAtEnd(() => S && !S.active && render()); }
+    paint(`<div class="card stack" style="text-align:center"><h2>The lesson has ended</h2>${me && S.points !== false ? `<p>You scored <b>${me.p}</b> points · #${me.r}</p>` : ""}<p class="muted">Thanks for taking part.</p>${notesOn ? endedNotesHtml() : ""}<button class="btn" id="again">Join another lesson</button></div>`, false);
     $("#again").onclick = () => showCode();
+    wireEnded();
     return;
   }
   if (S.board) {
