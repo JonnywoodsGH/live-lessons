@@ -69,7 +69,7 @@ function publicItem(q, round) {
   }
   return p;
 }
-/** What a student may see after answering (instant feedback) or after the reveal. */
+/** What a student may see once the question has closed (automatic feedback) or after the reveal. */
 async function keyFor(lesson, q) {
   const k = { c: q.correct || "", x: q.explain || "" };
   if (q.why && Object.keys(q.why).length) k.w = q.why;   // why each wrong option is wrong (AS-style hinge)
@@ -271,6 +271,7 @@ export function computeScores(lesson, s, votes, roster, progress) {
   Object.keys(votes || {}).forEach((vk) => {
     const q = lesson.questions[baseId(vk)];
     if (!q) return;
+    if (s.mode !== "self" && s.open && s.open[vk]) return;   // a jump in points would give the answer away — count it once the question closes
     Object.entries(votes[vk] || {}).forEach(([uid, v]) => {
       const me = (by[uid] = by[uid] || { p: 0, right: 0, done: 0 });
       me.done++;

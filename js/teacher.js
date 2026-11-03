@@ -82,7 +82,7 @@ function renderStart(lessons) {
       `<option value="${esc(id)}">${esc(id)} — ${esc(lessons[id].title)} (${lessons[id].slideCount} slides · ${qCount(lessons[id])})</option>`).join("")}</select></label>
     <label class="field"><span>Class</span><input type="text" id="cls" value="${esc(DEFAULT_CLASS)}"></label>
     <div class="opts">
-      <label><span>Students see if they're right</span><select id="optFb"><option value="reveal">when I reveal the answer (hinge style)</option><option value="instant">straight after answering</option></select></label>
+      <label><span>Students see if they're right</span><select id="optFb"><option value="reveal">when I reveal the answer (hinge style)</option><option value="instant">automatically when time's up</option></select></label>
       <label class="chk"><input type="checkbox" id="optPts" checked> Points and leaderboard</label>
       <label class="chk"><input type="checkbox" id="optTimer" checked> Countdown timer on questions</label>
       <label class="chk"><input type="checkbox" id="optAuto" checked> Open questions as soon as I reach them</label>
@@ -217,7 +217,7 @@ async function openSession(code) {
   LESSON = await L.loadLesson(s0.lessonId, true);
   if (!LESSON) { toast("That lesson has been deleted."); return; }
   buildSessionView();
-  sessionSubs.push(watch(`sessions/${code}`, (v) => { S = normS(v); if (!S) return; L.observe(code, S); renderSession(); }));
+  sessionSubs.push(watch(`sessions/${code}`, (v) => { S = normS(v); if (!S) return; L.observe(code, S); renderSession(); schedulePublish(); }));
   sessionSubs.push(watch(`presence/${code}`, (v) => { PRES = v || {}; renderSide(); renderStage(); renderTopCounts(); }));
   sessionSubs.push(watch("roster", (v) => { ROSTER = v || {}; renderSide(); schedulePublish(); }));
   sessionSubs.push(watch(`votes/${code}`, (v) => { VOTES = v || {}; renderSide(); renderStage(); schedulePublish(); }));
@@ -422,7 +422,7 @@ function renderSide() {
     html += `<div class="card stack"><div class="row"><div class="kicker">Leaderboard</div><span class="spacer"></span><button class="btn small ${S.board ? "on" : ""}" id="boardBtn2">${S.board ? "Hide from board" : "Show on board"}</button></div>${boardHtml(board, { limit: 5 })}</div>`;
   }
   html += `<div class="card stack small">
-      <div class="row"><span>Feedback:</span><select id="fbSel"><option value="reveal" ${S.feedback !== "instant" ? "selected" : ""}>when I reveal</option><option value="instant" ${S.feedback === "instant" ? "selected" : ""}>straight away</option></select>
+      <div class="row"><span>Feedback:</span><select id="fbSel"><option value="reveal" ${S.feedback !== "instant" ? "selected" : ""}>when I reveal</option><option value="instant" ${S.feedback === "instant" ? "selected" : ""}>when time's up</option></select>
       <label class="chk"><input type="checkbox" id="tmChk" ${S.timer !== false ? "checked" : ""}> timer</label>
       <label class="chk"><input type="checkbox" id="auChk" ${S.auto !== false ? "checked" : ""}> auto-open</label></div>
       <button class="btn" id="expNow">Export this session (CSV)</button></div>`;

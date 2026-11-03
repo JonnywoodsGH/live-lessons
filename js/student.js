@@ -143,7 +143,8 @@ function syncVotes(ids) {
     voteSubs[vk] = watch(`votes/${code}/${vk}/${user.uid}`, (v) => { MY[vk] = v; loadKeys(); rerender(); });
   });
 }
-const canSeeKey = (vk) => MY[vk] && (S.mode === "self" || S.feedback === "instant" || (S.reveal && S.reveal[vk]));
+// live lessons: never while the question is still open — feedback comes when time is up (or on the reveal)
+const canSeeKey = (vk) => MY[vk] && (S.mode === "self" || (S.reveal && S.reveal[vk]) || (S.feedback === "instant" && !(S.open && S.open[vk])));
 function loadKeys() {
   if (!S) return;
   Object.keys(voteSubs).forEach((vk) => {
@@ -189,12 +190,12 @@ setInterval(() => {
 
 /* ---------------- question rendering (live + self) ---------------- */
 function itemState(vk, open) {
-  const mine = MY[vk] || null, key = KEYS[vk];
+  const mine = MY[vk] || null, key = canSeeKey(vk) ? KEYS[vk] : null;
   const rev = S.reveal && S.reveal[vk];
   const correct = key && key.c ? key.c : rev && rev !== "*" ? rev : null;
   return {
     open, mine, correct, explain: key ? key.x : "", why: key && key.w, accept: key && key.acc, sending: !!sending[vk],
-    canChange: S.mode !== "self" && S.feedback === "reveal" && open,
+    canChange: S.mode !== "self" && open,
   };
 }
 
@@ -289,7 +290,7 @@ function render() {
   if (S.qs) {
     const qs = S.qs;
     const html = questionsHtml(qs.type, qs.round || 1, qs.ids, qs.items || {}, (vk) => !!(S.open && S.open[vk]), qs.title);
-    const waiting = !S.open && qs.ids.some((vk) => MY[vk] && !KEYS[vk] && !(S.reveal && S.reveal[vk]));
+    const waiting = S.feedback !== "instant" && !S.open && qs.ids.some((vk) => MY[vk] && !KEYS[vk] && !(S.reveal && S.reveal[vk]));
     paint(html + (waiting ? `<div class="banner info">Time's up — the answers come up on the board.</div>` : ""), false);
     wire();
     return;

@@ -210,6 +210,17 @@ function paintAsHinge(sec) {
   }
 }
 
+/** The original deck marks the right hinge option (.right) — the whole class can see the TV, so that mark
+ *  only goes back on once the answer is revealed (A, or the deck's answer build, which also closes voting). */
+function hideRightOption(sec) {
+  if (!sec.classList.contains("hinge")) return;
+  const opts = [...sec.querySelectorAll(".hopt")];
+  opts.forEach((o) => { if (o.classList.contains("right")) o.dataset.llRight = "1"; });
+  const it = LESSON && S.qs && LESSON.order[S.pos], vk = S.qs && S.qs.ids[0];
+  const shown = !!(it && it.t === "html" && it.n === deck.state.n && S.reveal && S.reveal[vk]);   // revealed, for THIS slide
+  opts.forEach((o) => o.classList.toggle("right", shown && o.dataset.llRight === "1"));
+}
+
 /** Results drawn onto the deck slide itself: a badge on each card / option. */
 let deckResultsDrawn = false;
 function paintDeckResults() {
@@ -218,6 +229,7 @@ function paintDeckResults() {
   const d = deck.frame.contentDocument; if (!d) return;
   d.querySelectorAll(".ll-badge").forEach((b) => b.remove());
   const sec = d.querySelector(".slide.active"); if (!sec) return;
+  hideRightOption(sec);
   if (S.qs && S.qs.type === "mcq" && sec.classList.contains("hinge") && sec.querySelector(".hopt .tc")) {
     paintAsHinge(sec);   // the deck's own tally + verdict, filled live
     deckResultsDrawn = true;
@@ -344,7 +356,8 @@ function deckGoto(n, st) {
 
 function deckMoved(n, st) {
   deck.state = { n, step: st };
-  clearTimeout(deck.reT); deck.reT = setTimeout(() => { if (S) renderOverlay(); }, 450);   // re-place the live clock once the slide has settled
+  try { const sec = deck.frame.contentDocument.querySelector(".slide.active"); if (sec && S) hideRightOption(sec); } catch (e) {}
+  clearTimeout(deck.reT); deck.reT = setTimeout(() => { if (S && LESSON) { paintDeckResults(); renderOverlay(); } }, 450);   // re-place the live clock once the slide has settled
   if (deck.sync) return;                                                    // we asked for this
   if (deck.expect && deck.expect.n === n && deck.expect.step === st) { deck.expect = null; return; }
   // the teacher moved the deck itself (slide menu, typed number, swipe, R to restart builds) → follow it

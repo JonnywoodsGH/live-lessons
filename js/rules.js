@@ -2,8 +2,8 @@
 //  • Teacher (your email) — everything.
 //  • Students (school domain) — read the session they joined + the current slide; write only their own
 //    answer, only while that question is open (or any time in a student-paced assignment, once);
-//    read the correct answer only AFTER they have answered (instant feedback / student-paced) or after
-//    you reveal it. They never see other students' answers, the lesson file or slides not yet shown.
+//    read the correct answer only AFTER they have answered AND the question has closed (automatic feedback),
+//    in a student-paced assignment, or after you reveal it. They never see other students' answers, the lesson file or slides not yet shown.
 export function buildRules(teacherEmails, schoolDomain) {
   const q = (s) => "'" + String(s).toLowerCase().replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
   const T = "(auth != null && auth.token.email_verified == true && (" +
@@ -28,7 +28,7 @@ export function buildRules(teacherEmails, schoolDomain) {
         ".read": T, ".write": T,
         $code: {
           $vk: {
-            ".read": `auth != null && root.child('votes').child($code).child($vk).child(auth.uid).exists() && (${sess("feedback")}.val() == 'instant' || ${self} || ${sess("reveal")}.child($vk).exists())`,
+            ".read": `auth != null && root.child('votes').child($code).child($vk).child(auth.uid).exists() && ((${sess("feedback")}.val() == 'instant' && ${sess("open")}.child($vk).val() != true) || ${self} || ${sess("reveal")}.child($vk).exists())`,
           },
         },
       },
@@ -38,7 +38,7 @@ export function buildRules(teacherEmails, schoolDomain) {
           $vk: {
             $uid: {
               ".read": "auth != null && auth.uid == $uid",
-              ".write": `${S} && auth.uid == $uid && ${active} && ((${self} && !data.exists()) || (${live} && ${sess("open")}.child($vk).val() == true && (!data.exists() || ${sess("feedback")}.val() == 'reveal')))`,
+              ".write": `${S} && auth.uid == $uid && ${active} && ((${self} && !data.exists()) || (${live} && ${sess("open")}.child($vk).val() == true))`,
               ".validate": "newData.hasChild('t') && (newData.hasChild('a') || newData.hasChild('w'))",
               a: { ".validate": "newData.isString() && newData.val().matches(/^[A-F1-6]$/)" },
               w: { ".validate": "newData.isString() && newData.val().matches(/^[^ ]{1,30}$/)" },
