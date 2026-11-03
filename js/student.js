@@ -13,6 +13,10 @@ let unsub = [], voteSubs = {}, MY = {}, KEYS = {}, keyLoading = {}, pick = {}, s
 let PROG = null, selfPos = 0, selfStep = 0, selfPack = {};
 
 const params = new URLSearchParams(location.search);
+// "Student view" for the teacher (projector corner / big screen): shows what devices show, read-only,
+// doesn't count as a student and follows whichever live lesson the teacher is running.
+const PREVIEW = params.get("preview") === "1";
+if (PREVIEW) document.body.classList.add("preview");
 const saved = () => { try { return sessionStorage.getItem("ll_code"); } catch (e) { return null; } };
 const remember = (c) => { try { c ? sessionStorage.setItem("ll_code", c) : sessionStorage.removeItem("ll_code"); } catch (e) {} };
 
@@ -50,6 +54,15 @@ if (!configured) {
     user = u;
     stopAll();
     if (!u) return showSignIn();
+    if (PREVIEW) {
+      if (!isTeacher(u)) return screen(`<h2>Student view</h2><p class="muted">Only the teacher account can open this view.</p>`);
+      let following = null;
+      return void watch("teacher/current", (c) => {
+        if (c === following) return;
+        following = c;
+        c ? join(c) : screen(`<h2>Student view</h2><p class="muted">No live lesson running — this view follows the next one you start.</p>`);
+      });
+    }
     const c = (params.get("c") || saved() || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     c ? join(c) : showCode();
   });
@@ -100,15 +113,17 @@ async function join(c) {
     return showCode("Couldn't connect — check the Wi-Fi and try again.");
   }
   if (!lessonId) return showCode(`No lesson with the code ${c}.`);
-  code = c; remember(c);
-
-  const name = user.displayName || user.email.split("@")[0];
-  set(r(`roster/${user.uid}`), { n: name, e: user.email }).catch(() => {});
-  const presRef = r(`presence/${c}/${user.uid}`);
-  unsub.push(watch(".info/connected", (on) => {
-    if (!on) return;
-    onDisconnect(presRef).remove().then(() => set(presRef, { n: name, t: serverTimestamp() })).catch(() => {});
-  }));
+  code = c;
+  if (!PREVIEW) {
+    remember(c);
+    const name = user.displayName || user.email.split("@")[0];
+    set(r(`roster/${user.uid}`), { n: name, e: user.email }).catch(() => {});
+    const presRef = r(`presence/${c}/${user.uid}`);
+    unsub.push(watch(".info/connected", (on) => {
+      if (!on) return;
+      onDisconnect(presRef).remove().then(() => set(presRef, { n: name, t: serverTimestamp() })).catch(() => {});
+    }));
+  }
   unsub.push(watch(".info/serverTimeOffset", (v) => (offset = +v || 0)));
   unsub.push(watch(`sessions/${c}`, (v) => {
     const first = !S;
@@ -158,7 +173,7 @@ function header() {
   return `<div class="s-top">
     <span class="title">${esc(S ? S.lessonTitle : "")}</span><span class="spacer"></span>
     ${left != null ? `<span class="pill timer-pill ${left <= 5 ? "warn" : ""}" id="tleft">⏱ ${fmtSecs(left)}</span>` : ""}
-    ${me && S.points !== false ? `<span class="pill score">★ ${me.p} · #${me.r}</span>` : ""}
+    ${PREVIEW ? `<span class="pill">Student view</span>` : me && S.points !== false ? `<span class="pill score">★ ${me.p} · #${me.r}</span>` : ""}
     ${S && S.active && S.mode !== "self" ? `<span class="pill live">Live</span>` : ""}
     <span class="pill">${esc(code)}</span>
   </div>`;
@@ -242,6 +257,7 @@ function questionsHtml(type, round, ids, items, openFn, title) {
 
 function currentItems() { return S.mode === "self" ? S.items || {} : (S.qs && S.qs.items) || {}; }
 function wire() {
+  if (PREVIEW) return; // looking only
   app.querySelectorAll(".s-opt[data-vk]").forEach((b) => (b.onclick = () => {
     const vk = b.dataset.vk, it = currentItems()[vk];
     pick[vk] = { a: b.dataset.opt };

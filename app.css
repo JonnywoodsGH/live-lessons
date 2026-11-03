@@ -231,3 +231,16 @@ table.cards td { padding: .4rem; border-bottom: 1px solid #f0ebe1; vertical-alig
 .strip button .qb { position: absolute; right: 4px; bottom: 3px; font: 700 .62rem var(--sans); background: var(--accent); color: #fff; border-radius: 4px; padding: 1px 5px; }
 .board-overlay .board { grid-template-columns: 1fr 1fr; grid-auto-flow: column; grid-template-rows: repeat(5, auto); column-gap: 2cqw; row-gap: 1cqw; }
 .board-overlay .board li { padding: 1cqw 1.6cqw; font-size: 2.2cqw; grid-template-columns: 3.4cqw 1fr auto; }
+
+/* ---------- "Student view" mirror on the projector ---------- */
+.dev-view { position: absolute; right: 1.4cqw; bottom: 1.4cqw; width: 17cqw; z-index: 8; background: #1d2433; border-radius: 2.2cqw; padding: 1.6cqw .7cqw .8cqw; box-shadow: 0 1.2cqw 4cqw rgba(0,0,0,.35); }
+.dev-label { position: absolute; top: .35cqw; left: 0; right: 0; text-align: center; color: #c8d1dd; font: 700 .9cqw var(--sans); letter-spacing: .1em; text-transform: uppercase; }
+.dev-screen { position: relative; width: 100%; aspect-ratio: 390 / 760; overflow: hidden; border-radius: 1.2cqw; background: var(--bg); }
+.dev-screen iframe { position: absolute; left: 0; top: 0; width: 390px; height: 760px; border: 0; transform-origin: 0 0; pointer-events: none; }
+body.preview .s-opt, body.preview .conf button { cursor: default; }
+
+/* ---------- touch screens (classroom touch TV) ---------- */
+@media (pointer: coarse) {
+  .hud { gap: 10px; padding: 10px; bottom: 18px; }
+  .hud .btn { min-height: 58px; padding: .5rem 1.1rem; font-size: 1.05rem; }
+}

@@ -235,6 +235,7 @@ function buildSessionView() {
       <span class="spacer"></span>
       <span class="pill" id="joinedPill">0 joined</span>
       <a class="btn" href="present.html" target="ll_projector">Open projector view ↗</a>
+      <a class="btn" href="index.html?preview=1" target="ll_student" title="What students' devices show — for a second screen">Student view ↗</a>
       <button class="btn" id="joinBtn">Join screen <kbd>J</kbd></button>
       <button class="btn" id="boardBtn">Leaderboard <kbd>S</kbd></button>
       <button class="btn danger" id="endBtn">End lesson</button>
@@ -244,7 +245,7 @@ function buildSessionView() {
         <div class="stage" id="stage"><div id="stageDeck" class="fill hidden"></div><div id="stageOther" class="fill"></div></div>
         <div class="row"><button class="btn" id="prevBtn">◀ Prev</button><span class="spacer"></span><span id="posLbl" class="muted"></span><span class="spacer"></span><button class="btn primary" id="nextBtn">Next ▶</button></div>
         <div class="strip" id="strip"></div>
-        <p class="small muted">Keys: ← → move · V open/close a question · R results on the board · A reveal the answer · S leaderboard · J join screen. A clicker that sends Page Up/Down also works.</p>
+        <p class="small muted">Keys: ← → move · V open/close a question · R results on the board · A reveal the answer · S leaderboard · J join screen · D student view (projector). A clicker that sends Page Up/Down also works.</p>
       </section>
       <aside class="stack" id="side"></aside>
     </div>

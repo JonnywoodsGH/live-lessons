@@ -26,7 +26,9 @@ function follow(code) {
   CODE = code; S = NOW = LESSON = null; PRES = {}; VOTES = {};
   if (!code) return msg("No live lesson running.<br><span class='small'>Start one on the teacher page — this window will follow it.</span>");
   resetDeck();
-  app.innerHTML = `<div class="stage" id="stage"><div id="deckLayer" class="fill hidden"></div><div id="other" class="fill"></div><div id="ov" class="fill" style="pointer-events:none"></div></div>`;
+  app.innerHTML = `<div class="stage" id="stage"><div id="deckLayer" class="fill hidden"></div><div id="other" class="fill"></div><div id="ov" class="fill" style="pointer-events:none"></div>
+    <div id="devView" class="dev-view ${devOn ? "" : "hidden"}"><div class="dev-label">Student view</div><div class="dev-screen"><iframe title="What students see" src="index.html?preview=1"></iframe></div></div></div>`;
+  fitDev();
   subs.push(watch(`sessions/${code}`, async (v) => {
     S = normS(v);
     if (S) L.observe(code, S);
@@ -41,6 +43,23 @@ function follow(code) {
   const iv = setInterval(() => { if (S && CODE === code) { L.tick(code, S, PRES, offset); paintClock(); } }, 500);
   subs.push(() => clearInterval(iv));
 }
+/* ---- "Student view": a phone-sized mirror of what devices show (D or the bar) ---- */
+let devOn = false;
+try { devOn = localStorage.getItem("ll_devview") === "1"; } catch (e) {}
+function fitDev() {
+  const box = document.querySelector("#devView .dev-screen"), f = box && box.querySelector("iframe");
+  if (!f) return;
+  const sc = box.clientWidth / 390;
+  f.style.transform = `scale(${sc})`;
+}
+addEventListener("resize", fitDev);
+function toggleDev() {
+  devOn = !devOn;
+  try { localStorage.setItem("ll_devview", devOn ? "1" : "0"); } catch (e) {}
+  const el = $("#devView"); if (el) el.classList.toggle("hidden", !devOn);
+  fitDev(); hud();
+}
+
 let pubT = null;
 function schedulePublish() { clearTimeout(pubT); pubT = setTimeout(() => { if (S && LESSON) L.publish(CODE, S, LESSON, VOTES, ROSTER); }, 600); }
 
@@ -243,7 +262,7 @@ function attach(f) {
   };
   const NAV = { ArrowRight: "next", ArrowDown: "next", PageDown: "next", " ": "next", Enter: "next", n: "next", N: "next",
     ArrowLeft: "prev", ArrowUp: "prev", PageUp: "prev", Backspace: "prev", p: "prev", P: "prev",
-    j: "join", J: "join", f: "fullscreen", F: "fullscreen", s: "board", S: "board" };
+    j: "join", J: "join", f: "fullscreen", F: "fullscreen", s: "board", S: "board", d: "devices", D: "devices" };
   const Q_KEYS = { v: "vote", V: "vote", r: "results", R: "results", a: "reveal", A: "reveal" };
   const overlayOpen = () => !!w.document.querySelector(".ov.show") || !!(w.document.getElementById("blank") || {}).className;
   w.addEventListener("keydown", (e) => {
@@ -316,6 +335,7 @@ const act = {
   reveal: () => S && S.qs && LESSON && L.reveal(CODE, S, LESSON, PRES),
   join: () => S && L.toggleJoin(CODE, S),
   board: () => S && L.toggleBoard(CODE, S),
+  devices: () => toggleDev(),
   fullscreen: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {})),
 };
 L.bindKeys(act);
@@ -338,6 +358,7 @@ function hud() {
     <button class="btn ${S.results ? "on" : ""}" data-a="results">Results</button>
     <button class="btn ${revealed ? "on" : ""}" data-a="reveal">Answer</button>` : ""}
     ${S.points !== false ? `<button class="btn ${S.board ? "on" : ""}" data-a="board">Leaderboard</button>` : ""}
+    <button class="btn ${devOn ? "on" : ""}" data-a="devices">Student view</button>
     <button class="btn" data-a="fullscreen">⛶</button>`;
 }
 function wake() {

@@ -392,7 +392,7 @@ export function bindKeys(h) {
       ArrowRight: "next", PageDown: "next", " ": "next", ArrowDown: "next",
       ArrowLeft: "prev", PageUp: "prev", ArrowUp: "prev",
       v: "vote", V: "vote", r: "results", R: "results", a: "reveal", A: "reveal",
-      j: "join", J: "join", f: "fullscreen", F: "fullscreen", s: "board", S: "board",
+      j: "join", J: "join", f: "fullscreen", F: "fullscreen", s: "board", S: "board", d: "devices", D: "devices",
     };
     const act = map[e.key];
     if (act && h[act]) { e.preventDefault(); h[act](); }
