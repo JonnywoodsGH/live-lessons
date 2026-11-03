@@ -29,12 +29,13 @@
   const cfgOk = !/PASTE_/.test(JSON.stringify(firebaseConfig));
   const urlOk = /^https:\/\/.+(firebaseio\.com|firebasedatabase\.app)\/?$/.test(firebaseConfig.databaseURL || "");
   const tOk = TEACHER_EMAILS.length && !TEACHER_EMAILS.some((e) => /yourschool|your\.name/.test(e));
-  const dOk = SCHOOL_DOMAIN && !/yourschool/.test(SCHOOL_DOMAIN);
+  const DOMS = [].concat(SCHOOL_DOMAIN).filter(Boolean);
+  const dOk = DOMS.length && !DOMS.some((d) => /yourschool/.test(d));
   document.getElementById("cfg").innerHTML = `<div class="kicker">js/config.js</div><h2>Settings</h2>
     <p>${ok(cfgOk)} Firebase config pasted</p>
     <p>${ok(urlOk)} databaseURL looks right <span class="muted small">(${firebaseConfig.databaseURL})</span></p>
     <p>${ok(tOk)} Teacher email: <b>${TEACHER_EMAILS.join(", ")}</b></p>
-    <p>${ok(dOk)} Students' domain: <b>@${SCHOOL_DOMAIN}</b></p>
+    <p>${ok(dOk)} Who can join as a student: ${DOMS.map((d) => `<b>@${d}</b>`).join(" or ")}</p>
     <p class="small muted">This site is at <b>${location.host || "(opened from a file)"}</b> — that host must be listed in Firebase console → Authentication → Settings → Authorized domains.</p>`;
   const text = JSON.stringify(buildRules(TEACHER_EMAILS, SCHOOL_DOMAIN), null, 2);
   document.getElementById("rules").textContent = text;

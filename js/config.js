@@ -20,8 +20,10 @@ export const firebaseConfig = {
 // 2. Your Google account(s) — only these can run lessons, upload slides and see results.
 export const TEACHER_EMAILS = ["v.johnwa@vinschool.edu.vn"];
 
-// 3. The part after @ in students' school Google accounts. Only these accounts can join.
-export const SCHOOL_DOMAIN = "stu.vinschool.edu.vn";
+// 3. The part after @ in the Google accounts that can join as students. One domain, or a list.
+//    vinschool.edu.vn is in for now so other teachers can try it as students
+//    (they can't run lessons — only TEACHER_EMAILS can). Remove it after testing.
+export const SCHOOL_DOMAIN = ["stu.vinschool.edu.vn", "vinschool.edu.vn"];
 
 // 4. Default class label used in session IDs and the CSV (matches the AfL Platform).
 export const DEFAULT_CLASS = "IGCSE2627";

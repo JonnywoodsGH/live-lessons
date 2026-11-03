@@ -72,7 +72,7 @@ function showSignIn(msg) {
   screen(`
     <div class="kicker">Live lesson</div>
     <h2>Sign in to join</h2>
-    <p class="muted">Use your school Google account${/yourschool/.test(SCHOOL_DOMAIN) ? "" : ` (<b>@${esc(SCHOOL_DOMAIN)}</b>)`}.</p>
+    <p class="muted">Use your school Google account${/yourschool/.test(String(SCHOOL_DOMAIN)) ? "" : ` (${[].concat(SCHOOL_DOMAIN).map((d) => `<b>@${esc(d)}</b>`).join(" or ")})`}.</p>
     ${msg ? `<div class="banner bad">${esc(msg)}</div>` : ""}
     <button class="btn primary" id="go" style="width:100%">Sign in with Google</button>`);
   $("#go").onclick = async () => { try { await signIn(); } catch (e) { showSignIn(e.message || String(e)); } };

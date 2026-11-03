@@ -8,7 +8,8 @@ export function buildRules(teacherEmails, schoolDomain) {
   const q = (s) => "'" + String(s).toLowerCase().replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
   const T = "(auth != null && auth.token.email_verified == true && (" +
     teacherEmails.map((e) => `auth.token.email.toLowerCase() == ${q(e)}`).join(" || ") + "))";
-  const S = `(auth != null && auth.token.email_verified == true && (auth.token.email.toLowerCase().endsWith(${q("@" + schoolDomain)}) || ${T}))`;
+  const doms = [].concat(schoolDomain).filter(Boolean);
+  const S = `(auth != null && auth.token.email_verified == true && (${doms.map((d) => `auth.token.email.toLowerCase().endsWith(${q("@" + d)})`).join(" || ")} || ${T}))`;
   const sess = (f) => `root.child('sessions').child($code).child('${f}')`;
   const live = `${sess("mode")}.val() != 'self'`;
   const self = `${sess("mode")}.val() == 'self'`;
