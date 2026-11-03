@@ -367,7 +367,7 @@ function renderAway() {
   el.classList.remove("hidden");
   const n = rows.filter((x) => x.out).length;
   el.innerHTML = `<div class="row"><div class="kicker">Left the lesson page</div><span class="spacer"></span>${n ? `<span class="pill away-pill">${n} away now</span>` : ""}</div>
-    <div class="away-list">${rows.map((x) => `<div class="${x.out ? "out" : ""}"><span class="dot"></span><b>${esc(name(x.uid))}</b><span class="spacer"></span>${x.out ? `away ${awayText(x.cur)} · ` : ""}<span class="muted">${awayText(x.total)} total · ${x.k}×</span></div>`).join("")}</div>
+    <div class="away-list">${rows.map((x) => `<div class="${x.out ? "out" : ""}"><span class="dot"></span><div><b>${esc(name(x.uid))}</b><div class="small">${x.out ? `<span class="now">away ${awayText(x.cur)}</span> · ` : ""}<span class="muted">${awayText(x.total)} in total · ${x.k} time${x.k === 1 ? "" : "s"}</span></div></div></div>`).join("")}</div>
     <p class="small muted" style="margin:0">Only you see this. A locked screen counts too, so check before you act on it.</p>`;
 }
 

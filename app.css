@@ -205,7 +205,9 @@ body:has(.notes-dock.open) .s-main { padding-bottom: 46vh; }
 .away-nudge .btn { justify-self: end; }
 .away-pill { background: #FFF6E8; color: #D96A20; }
 .away-list { display: grid; gap: .25rem; font-size: .88rem; }
-.away-list > div { display: flex; align-items: center; gap: .45rem; }
+.away-list > div { display: grid; grid-template-columns: .6rem 1fr; column-gap: .55rem; align-items: start; }
+.away-list .dot { margin-top: .4rem; }
+.away-list .now { color: #D96A20; font-weight: 600; }
 .away-list .dot { width: .6rem; height: .6rem; border-radius: 50%; background: #cfc4b1; flex: none; }
 .away-list .out .dot { background: #D96A20; box-shadow: 0 0 0 3px rgba(217,106,32,.2); }
 .away-list .out b { color: #D96A20; }
