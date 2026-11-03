@@ -6,9 +6,10 @@ import { configured, onUser, signIn, isTeacher, watch, read } from "./fb.js";
 import { $, esc, joinUrl, shortJoinUrl, tally, hingeSlideHtml, cloudHtml, countWords, boardHtml, fmtSecs, normS } from "./ui.js";
 import * as L from "./session.js";
 import QR from "./qr.js";
+import { AWAY_MIN } from "./away.js";
 
 const app = $("#app");
-let CODE = null, S = null, NOW = null, PRES = {}, VOTES = {}, LESSON = null, ROSTER = {}, offset = 0;
+let CODE = null, S = null, NOW = null, PRES = {}, VOTES = {}, LESSON = null, ROSTER = {}, AWAY = {}, offset = 0;
 let subs = [];
 const deck = { frame: null, lesson: null, ready: false, state: { n: 0, step: 0 }, want: null, expect: null, sync: false, numPending: false };
 
@@ -23,10 +24,10 @@ else onUser((u) => {
 
 function follow(code) {
   subs.forEach((f) => f()); subs = [];
-  CODE = code; S = NOW = LESSON = null; PRES = {}; VOTES = {};
+  CODE = code; S = NOW = LESSON = null; PRES = {}; VOTES = {}; AWAY = {}; awayShown = 0;
   if (!code) return msg("No live lesson running.<br><span class='small'>Start one on the teacher page — this window will follow it.</span>");
   resetDeck();
-  app.innerHTML = `<div class="stage" id="stage"><div id="deckLayer" class="fill hidden"></div><div id="other" class="fill"></div><div id="ov" class="fill" style="pointer-events:none"></div>
+  app.innerHTML = `<div class="stage" id="stage"><div id="deckLayer" class="fill hidden"></div><div id="other" class="fill"></div><div id="ov" class="fill" style="pointer-events:none"></div><div id="awayBoard" class="away-board hidden"></div>
     <div id="devView" class="dev-view ${devOn ? "" : "hidden"}"><div class="dev-label">Student view</div><div class="dev-screen"><iframe title="What students see" src="index.html?preview=1"></iframe></div></div></div>`;
   fitDev();
   subs.push(watch(`sessions/${code}`, async (v) => {
@@ -39,9 +40,34 @@ function follow(code) {
   subs.push(watch(`presence/${code}`, (v) => { PRES = v || {}; renderOverlay(); }));
   subs.push(watch(`votes/${code}`, (v) => { VOTES = v || {}; render(); schedulePublish(); }));
   subs.push(watch("roster", (v) => { ROSTER = v || {}; schedulePublish(); }));
+  subs.push(watch(`away/${code}`, (v) => { AWAY = v || {}; paintAway(); }));
   subs.push(watch(".info/serverTimeOffset", (v) => (offset = +v || 0)));
-  const iv = setInterval(() => { if (S && CODE === code) { L.tick(code, S, PRES, offset); paintClock(); } }, 500);
+  const iv = setInterval(() => { if (S && CODE === code) { L.tick(code, S, PRES, offset); paintClock(); paintAway(); } }, 500);
   subs.push(() => clearInterval(iv));
+}
+/* ---- "Left the lesson page" on the board: a count only, never names (teacher option) ---- */
+let awayShown = 0, audio = null;
+function paintAway() {
+  const el = document.getElementById("awayBoard"); if (!el) return;
+  const now = Date.now() + offset;
+  const n = S && S.awayBoard && S.active ? Object.values(AWAY).filter((a) => a.a && (now - a.a) / 1000 >= AWAY_MIN).length : 0;
+  el.classList.toggle("hidden", !n);
+  if (n) el.textContent = `👀 ${n} student${n === 1 ? " has" : "s have"} left the lesson page`;
+  if (n > awayShown) chime();
+  awayShown = n;
+}
+function chime() {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === "suspended") audio.resume();
+    const t = audio.currentTime;
+    [660, 880].forEach((f, i) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0, t + i * 0.18); g.gain.linearRampToValueAtTime(0.12, t + i * 0.18 + 0.03); g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.18 + 0.5);
+      o.connect(g).connect(audio.destination); o.start(t + i * 0.18); o.stop(t + i * 0.18 + 0.55);
+    });
+  } catch (e) {}
 }
 /* ---- "Student view": a phone-sized mirror of what devices show (D or the bar) ---- */
 let devOn = false;

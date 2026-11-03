@@ -5,7 +5,8 @@ import { configured, onUser, signIn, logOut, watch, read, r, set, update, onDisc
 import { SCHOOL_DOMAIN } from "./config.js";
 import { $, esc, isCodeLike, cloudHtml, boardHtml, fmtSecs, normS } from "./ui.js";
 import { deckView } from "./deckview.js";
-import { startNotes, stopNotes, setNotesTitle, notesButton, paintDock, toggleNotes, sendNotesAtEnd, endedNotesHtml, wireEnded } from "./notes.js";
+import { startNotes, stopNotes, setNotesTitle, setSlide, setReview, notesButton, paintDock, toggleNotes, sendNotesAtEnd, endedNotesHtml, wireEnded } from "./notes.js";
+import { startAway, stopAway, awayText } from "./away.js";
 
 const app = $("#app");
 const CONF = [[1, "Guessing"], [2, "Not sure"], [3, "Fairly sure"], [4, "Certain"]];
@@ -110,6 +111,7 @@ function showCode(msg) {
     ${msg ? `<div class="banner bad">${esc(msg)}</div>` : ""}
     <input id="code" class="code-input" type="text" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="····">
     <button class="btn primary" id="go" style="width:100%">Join</button>
+    <p class="small muted">👀 During a live lesson your teacher can see if you leave this page (switch tab or app).</p>
     <p class="small muted">Signed in as ${esc(user.email)} · <a href="#" id="out">not you?</a></p>
     ${isTeacher(user) ? `<p class="small"><a href="teacher.html">Open the teacher page →</a></p>` : ""}`);
   const inp = $("#code");
@@ -126,7 +128,32 @@ function stopAll() {
   Object.values(voteSubs).forEach((f) => f()); voteSubs = {};
   S = NOW = PROG = null; MY = {}; KEYS = {}; keyLoading = {}; pick = {}; sending = {}; selfPack = {};
   stopNotes(); notesOn = false;
+  stopAway(); awayOn = false;
 }
+let awayOn = false;
+function nudge(secs) {
+  document.querySelectorAll(".away-nudge").forEach((x) => x.remove());
+  const d = document.createElement("div");
+  d.className = "away-nudge";
+  d.innerHTML = `<b>You left the lesson for ${awayText(secs)}.</b><span>Your teacher can see this.</span><button class="btn small" type="button">OK</button>`;
+  d.querySelector("button").onclick = () => d.remove();
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), 10000);
+}
+/** A name for the current slide, for notes: the deck slide's heading (if students can read it yet). */
+function slideTitle() {
+  if (!S) return "";
+  if (S.qs && S.qs.title) return S.qs.title;
+  if (NOW && NOW.pos === S.pos && NOW.html) {
+    const t = document.createElement("template"); t.innerHTML = NOW.html;
+    const h = t.content.querySelector("h1, h2, .title");
+    const txt = h ? h.textContent.replace(/\s+/g, " ").trim() : "";
+    if (txt && !/^[x0\W\s]+$/.test(txt)) return txt.slice(0, 120);   // not a scrambled (not yet shown) build
+  }
+  if (S.qs) return S.qs.type === "word" ? "One-word question" : "Question";
+  return "";
+}
+function followSlide() { if (notesOn && S && S.mode !== "self") { setSlide(S.pos, slideTitle()); setReview(S.review); } }
 // notes: live lessons only, not for the teacher's "Student view"
 let notesOn = false;
 app.addEventListener("click", (e) => { if (e.target.closest("#notesBtn")) toggleNotes(); });
@@ -158,11 +185,14 @@ async function join(c) {
     S = normS(v);
     if (S && !PREVIEW && S.mode !== "self" && !notesOn) { notesOn = true; startNotes(c, user, S.lessonTitle, S.sessionId); }
     if (S && notesOn) setNotesTitle(S.lessonTitle);
+    followSlide();
+    if (S && !PREVIEW && S.mode !== "self" && S.active && !awayOn) { awayOn = true; startAway(c, user.uid, nudge, () => Date.now() + offset); }
+    if (S && awayOn && !S.active) { stopAway(); awayOn = false; }
     if (!S) return showCode("This lesson was removed.");
     if (S.mode === "self") { if (first) startSelf(); else renderSelf(); return; }
     syncVotes(S.qs ? S.qs.ids : []); loadKeys(); render();
   }, () => showCode("Lost access to this lesson.")));
-  unsub.push(watch(`now/${c}`, (v) => { NOW = v; if (S && S.mode !== "self") render(); }));
+  unsub.push(watch(`now/${c}`, (v) => { NOW = v; followSlide(); if (S && S.mode !== "self") render(); }));
 }
 
 /* ---------------- my answers + keys ---------------- */
@@ -319,7 +349,7 @@ function render() {
     paint(`<div class="card stack"><div class="kicker">Leaderboard</div>${boardHtml(S.top)}${me ? `<p class="banner info">You: #${me.r} · ${me.p} points</p>` : ""}</div>`, false);
     return;
   }
-  const foot = `<p class="small muted" style="text-align:center;margin-top:.6rem">Slide ${S.pos + 1} of ${S.total} · this page follows your teacher's screen</p>`;
+  const foot = `<p class="small muted" style="text-align:center;margin-top:.6rem">Slide ${S.pos + 1} of ${S.total} · this page follows your teacher's screen · your teacher can see if you leave it</p>`;
   if (S.qs) {
     const qs = S.qs;
     const html = questionsHtml(qs.type, qs.round || 1, qs.ids, qs.items || {}, (vk) => !!(S.open && S.open[vk]), qs.title);
@@ -348,6 +378,10 @@ async function startSelf() {
   selfPos = Math.min(PROG.pos || 0, Math.max(0, (S.total || 1) - 1));
   selfStep = PROG.step || 0;
   if (PROG.done) selfPos = selfOrder().length;
+  const sp = +params.get("s");   // "Open this slide" link from the notes email
+  if (sp > 0 && params.get("c") && params.get("c").toUpperCase() === code && !startSelf.jumped) {
+    startSelf.jumped = true; selfPos = Math.min(sp - 1, selfOrder().length - 1); selfStep = 0;
+  }
   renderSelf();
 }
 function slideData(i) {

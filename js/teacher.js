@@ -1,6 +1,7 @@
 // Teacher page: lessons, live (teacher-paced) sessions, student-paced assignments, private results, CSV export.
 import { configured, onUser, signIn, logOut, isTeacher, watch, read, set, r } from "./fb.js";
-import { DEFAULT_CLASS } from "./config.js";
+import { DEFAULT_CLASS, NOTES_EMAIL_URL } from "./config.js";
+import { AWAY_MIN, awayText } from "./away.js";
 import { $, esc, toast, joinUrl, tally, hingeSlideHtml, fmtTime, cloudHtml, countWords, boardHtml, fmtSecs, encodeKey, normS } from "./ui.js";
 import * as L from "./session.js";
 import { uploadLesson, deleteLesson } from "./upload.js";
@@ -13,7 +14,7 @@ let user = null, subs = [], offset = 0;
 const off = () => { subs.forEach((f) => f()); subs = []; };
 
 // live state
-let CODE = null, S = null, LESSON = null, PRES = {}, ROSTER = {}, VOTES = {}, PROG = {};
+let CODE = null, S = null, LESSON = null, PRES = {}, ROSTER = {}, VOTES = {}, PROG = {}, AWAY = {};
 let thumbs = {}, sessionSubs = [], selfCode = null;
 
 function centre(html) { app.innerHTML = `<div class="center"><div class="card stack">${html}</div></div>`; }
@@ -196,7 +197,7 @@ function renderPast(sessions) {
 /* ======================= LIVE SESSION ======================= */
 function leaveSession() {
   sessionSubs.forEach((f) => f()); sessionSubs = [];
-  CODE = S = LESSON = null; PRES = {}; VOTES = {}; PROG = {}; thumbs = {};
+  CODE = S = LESSON = null; PRES = {}; VOTES = {}; PROG = {}; AWAY = {}; thumbs = {};
   if (tDeck) tDeck.destroy(); tDeck = null; tDeckLesson = null; tDeckP = null;
 }
 
@@ -221,7 +222,8 @@ async function openSession(code) {
   sessionSubs.push(watch(`presence/${code}`, (v) => { PRES = v || {}; renderSide(); renderStage(); renderTopCounts(); }));
   sessionSubs.push(watch("roster", (v) => { ROSTER = v || {}; renderSide(); schedulePublish(); }));
   sessionSubs.push(watch(`votes/${code}`, (v) => { VOTES = v || {}; renderSide(); renderStage(); schedulePublish(); }));
-  const iv = setInterval(() => { if (S && CODE === code) { L.tick(code, S, PRES, offset); updateClock(); } }, 1000);
+  sessionSubs.push(watch(`away/${code}`, (v) => { AWAY = v || {}; renderAway(); }));
+  const iv = setInterval(() => { if (S && CODE === code) { L.tick(code, S, PRES, offset); updateClock(); renderAway(); } }, 1000);
   sessionSubs.push(() => clearInterval(iv));
   loadThumbs();
 }
@@ -255,7 +257,21 @@ function buildSessionView() {
   $("#nextBtn").onclick = () => act.next();
   $("#joinBtn").onclick = () => act.join();
   $("#boardBtn").onclick = () => act.board();
-  $("#endBtn").onclick = async () => { if (confirm("End the lesson for everyone?")) { await L.endSession(CODE); toast("Lesson ended"); } };
+  $("#endBtn").onclick = async (e) => {
+    if (!confirm("End the lesson for everyone?")) return;
+    const btn = e.currentTarget, code = CODE, s = S;
+    btn.disabled = true;
+    // students' notes emails link to a self-paced copy of this lesson, so they can look back at each slide
+    let review = null;
+    if (NOTES_EMAIL_URL) {
+      try {
+        btn.textContent = "Making the review link…";
+        review = await L.startAssignment(s.lessonId, s.cls || DEFAULT_CLASS, user.email, { points: false, due: null }, (m, p) => (btn.textContent = `Making the review link… ${Math.round(p * 100)}%`));
+      } catch (err) { console.warn(err); }
+    }
+    await L.endSession(code, review);
+    toast(review ? `Lesson ended. Students' notes link to the review copy (${review}).` : "Lesson ended");
+  };
   buildStrip();
 }
 
@@ -335,6 +351,23 @@ function renderStage() {
   const src = thumbs[it.n];
   el.innerHTML = src ? `<img src="${src}" alt="">` : `<div class="hinge-slide"><p class="muted">Loading slide…</p></div>`;
   if (!src) L.slideImg(LESSON.id, it.n).then((s) => { thumbs[it.n] = s; renderStage(); });
+}
+
+/** "Left the lesson page": who is away right now (amber, with how long) and everyone's total. Private to you. */
+function renderAway() {
+  const el = $("#awayCard"); if (!el || !S) return;
+  const now = Date.now() + offset;
+  const rows = Object.entries(AWAY).map(([uid, a]) => {
+    const cur = a.a ? Math.round((now - a.a) / 1000) : 0;
+    const out = cur >= AWAY_MIN;
+    return { uid, out, cur, total: (+a.w || 0) + (out ? cur : 0), k: (+a.k || 0) + (out ? 1 : 0) };
+  }).filter((x) => x.total > 0).sort((a, b) => b.out - a.out || b.total - a.total);
+  if (!rows.length) { el.innerHTML = ""; el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+  const n = rows.filter((x) => x.out).length;
+  el.innerHTML = `<div class="row"><div class="kicker">Left the lesson page</div><span class="spacer"></span>${n ? `<span class="pill away-pill">${n} away now</span>` : ""}</div>
+    <div class="away-list">${rows.map((x) => `<div class="${x.out ? "out" : ""}"><span class="dot"></span><b>${esc(name(x.uid))}</b><span class="spacer"></span>${x.out ? `away ${awayText(x.cur)} · ` : ""}<span class="muted">${awayText(x.total)} total · ${x.k}×</span></div>`).join("")}</div>
+    <p class="small muted" style="margin:0">Only you see this. A locked screen counts too, so check before you act on it.</p>`;
 }
 
 const name = (uid) => (ROSTER[uid] && ROSTER[uid].n) || (PRES[uid] && PRES[uid].n) || "Student";
@@ -421,10 +454,12 @@ function renderSide() {
     const { board } = L.computeScores(LESSON, S, VOTES, ROSTER);
     html += `<div class="card stack"><div class="row"><div class="kicker">Leaderboard</div><span class="spacer"></span><button class="btn small ${S.board ? "on" : ""}" id="boardBtn2">${S.board ? "Hide from board" : "Show on board"}</button></div>${boardHtml(board, { limit: 5 })}</div>`;
   }
+  html += `<div class="card stack hidden" id="awayCard"></div>`;
   html += `<div class="card stack small">
       <div class="row"><span>Feedback:</span><select id="fbSel"><option value="reveal" ${S.feedback !== "instant" ? "selected" : ""}>when I reveal</option><option value="instant" ${S.feedback === "instant" ? "selected" : ""}>when time's up</option></select>
       <label class="chk"><input type="checkbox" id="tmChk" ${S.timer !== false ? "checked" : ""}> timer</label>
       <label class="chk"><input type="checkbox" id="auChk" ${S.auto !== false ? "checked" : ""}> auto-open</label></div>
+      <label class="chk"><input type="checkbox" id="awChk" ${S.awayBoard ? "checked" : ""}> Tell the class (no names) on the board when students leave the page, with a soft chime</label>
       <button class="btn" id="expNow">Export this session (CSV)</button></div>`;
   el.innerHTML = html;
   const b = (id, f) => { const x = $("#" + id); if (x) x.onclick = f; };
@@ -438,7 +473,8 @@ function renderSide() {
   $("#fbSel").onchange = (e) => L.setOption(CODE, "feedback", e.target.value);
   $("#tmChk").onchange = (e) => L.setOption(CODE, "timer", e.target.checked);
   $("#auChk").onchange = (e) => L.setOption(CODE, "auto", e.target.checked);
-  updateClock();
+  $("#awChk").onchange = (e) => L.setOption(CODE, "awayBoard", e.target.checked);
+  updateClock(); renderAway();
 }
 
 /* ======================= STUDENT-PACED DASHBOARD ======================= */

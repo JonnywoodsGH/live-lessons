@@ -200,6 +200,18 @@ body.present.hud-awake .corner-code { opacity: 1; }
 .notes-sheet textarea, .notes-copy { width: 100%; box-sizing: border-box; min-height: 30vh; max-height: 45vh; resize: vertical; font: 1rem/1.45 var(--sans, sans-serif); padding: .6rem .7rem; border: 1px solid var(--line); border-radius: 10px; }
 .notes-copy { min-height: 120px; text-align: left; }
 body:has(.notes-dock.open) .s-main { padding-bottom: 46vh; }
+.away-board { position: absolute; left: 1.4cqw; top: 1.2cqw; z-index: 6; background: rgba(217,106,32,.95); color: #fff; font: 700 1.5cqw var(--sans); padding: .6cqw 1.3cqw; border-radius: 99px; box-shadow: 0 .4cqw 1.4cqw rgba(0,0,0,.25); }
+.away-nudge { position: fixed; left: 50%; top: 70px; transform: translateX(-50%); z-index: 40; width: min(92vw, 420px); box-sizing: border-box; background: #FFF6E8; color: #8a4310; border: 2px solid #D96A20; border-radius: 14px; padding: .8rem 1rem; display: grid; gap: .3rem; box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+.away-nudge .btn { justify-self: end; }
+.away-pill { background: #FFF6E8; color: #D96A20; }
+.away-list { display: grid; gap: .25rem; font-size: .88rem; }
+.away-list > div { display: flex; align-items: center; gap: .45rem; }
+.away-list .dot { width: .6rem; height: .6rem; border-radius: 50%; background: #cfc4b1; flex: none; }
+.away-list .out .dot { background: #D96A20; box-shadow: 0 0 0 3px rgba(217,106,32,.2); }
+.away-list .out b { color: #D96A20; }
+.notes-earlier summary { cursor: pointer; color: var(--ink-2); }
+.notes-item { display: grid; gap: .1rem; width: 100%; text-align: left; background: #f6f1e8; border: 0; border-radius: 8px; padding: .4rem .6rem; margin-top: .35rem; cursor: pointer; font: inherit; font-size: .88rem; }
+.notes-item span { color: var(--ink-2); }
 .timer-pill { background: var(--accent-soft); color: var(--accent); font-variant-numeric: tabular-nums; }
 .timer-pill.warn { background: var(--bad); color: #fff; }
 .pill.score { background: #fff4cc; color: #8a6200; }

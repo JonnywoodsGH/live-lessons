@@ -6,7 +6,7 @@ import { normWord } from "./ui.js";
 
 const COLS = ["response_id", "timestamp", "session_id", "mode", "join_code", "date", "class", "lesson_id", "item_id", "question_type",
   "round", "student_name", "student_email", "answer", "correct", "misconception_id", "confidence", "time_taken_s", "points",
-  "activity", "afl_strategy"];
+  "activity", "afl_strategy", "time_away_s"];
 
 const csvCell = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 const iso = (ms) => (ms ? new Date(ms).toISOString() : "");
@@ -16,6 +16,8 @@ export async function rowsForSession(s, roster, lessonCache = {}) {
   const lesson = lessonCache[s.lessonId] || (lessonCache[s.lessonId] = await loadLesson(s.lessonId)) || { questions: {}, order: [] };
   const votes = (await read(`votes/${s.code}`)) || {};
   const progress = s.mode === "self" ? (await read(`progress/${s.code}`)) || {} : {};
+  // live lessons: the student's total time away from the lesson page (whole lesson, same on each of their rows)
+  const away = s.mode !== "self" ? (await read(`away/${s.code}`).catch(() => null)) || {} : {};
   const setOf = {};
   (lesson.order || []).forEach((it) => { if (it.q) (it.q.ids || []).forEach((id) => (setOf[id] = it.q.type)); });
   const rows = [];
@@ -48,6 +50,7 @@ export async function rowsForSession(s, roster, lessonCache = {}) {
         answer: ans || "(no answer)", correct, misconception_id: mc, confidence: v && v.c ? v.c : "", time_taken_s: secs, points: pts,
         activity: kind === "word" ? "one word" : kind === "card" ? "whole-class check" : "hinge",
         afl_strategy: kind === "word" ? "word cloud" : kind === "card" ? "whole-class response" : "hinge question",
+        time_away_s: s.mode !== "self" ? (away[uid] && +away[uid].w) || 0 : "",
       });
     });
   });

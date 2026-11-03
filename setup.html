@@ -41,7 +41,7 @@
   import { firebaseConfig, TEACHER_EMAILS, SCHOOL_DOMAIN, NOTES_EMAIL_URL } from "./js/config.js";
   import { buildRules } from "./js/rules.js";
   import { notesScript } from "./js/notesmail.js";
-  const gs = notesScript(firebaseConfig.apiKey, SCHOOL_DOMAIN);
+  const gs = notesScript(firebaseConfig.apiKey, SCHOOL_DOMAIN, new URL("./", location.href).href);
   document.getElementById("gs").textContent = gs;
   document.getElementById("tEmail").textContent = TEACHER_EMAILS[0] || "your school account";
   document.getElementById("mailState").innerHTML = NOTES_EMAIL_URL

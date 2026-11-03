@@ -6,6 +6,7 @@
 //    in a student-paced assignment, or after you reveal it. They never see other students' answers,
 //    the lesson file or slides not yet shown.
 //  • Students' lesson notes are private to each student (the teacher can't read them).
+//  • Time away from the lesson page: each student writes their own; only the teacher can read it.
 export function buildRules(teacherEmails, schoolDomain) {
   const q = (s) => "'" + String(s).toLowerCase().replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
   const T = "(auth != null && auth.token.email_verified == true && (" +
@@ -73,9 +74,25 @@ export function buildRules(teacherEmails, schoolDomain) {
           $uid: {
             ".read": "auth != null && auth.uid == $uid",
             ".write": `${S} && auth.uid == $uid && (${active} || !newData.exists())`,
-            ".validate": "newData.hasChildren(['x', 't'])",
-            x: { ".validate": "newData.isString() && newData.val().length <= 5000" },
+            ".validate": "newData.hasChildren(['s', 't'])",
+            s: { $p: { ".validate": "$p.matches(/^p[0-9]{1,3}$/) && newData.isString() && newData.val().length <= 2000" } },
+            h: { $p: { ".validate": "$p.matches(/^p[0-9]{1,3}$/) && newData.isString() && newData.val().length <= 120" } },
             t: { ".validate": "newData.val() == now" },
+            $other: { ".validate": false },
+          },
+        },
+      },
+      // time away from the lesson page (live lessons): the teacher can read it, each student writes only their own.
+      away: {
+        $code: {
+          ".read": T,
+          $uid: {
+            ".read": "auth != null && auth.uid == $uid",
+            ".write": `${S} && auth.uid == $uid && ${active} && ${live}`,
+            ".validate": "newData.hasChildren(['w', 'k'])",
+            a: { ".validate": "newData.val() == now" },
+            w: { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 86400" },
+            k: { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000" },
             $other: { ".validate": false },
           },
         },

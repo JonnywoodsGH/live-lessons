@@ -254,8 +254,10 @@ export function secondsLeft(s, offset = 0) {
 
 export async function hideWord(code, vk, k, hidden) { await set(r(`sessions/${code}/hidden/${vk}/${encodeKey(k)}`), hidden ? true : null); }
 
-export async function endSession(code) {
+/** review: code of a self-paced copy of the lesson, linked from students' notes emails. */
+export async function endSession(code, review) {
   const u = {};
+  if (review) u[`sessions/${code}/review`] = review;
   u[`sessions/${code}/active`] = false;
   u[`sessions/${code}/endedAt`] = serverTimestamp();
   u[`sessions/${code}/open`] = null;
