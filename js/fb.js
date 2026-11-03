@@ -33,6 +33,13 @@ export async function signIn() {
       return signInWithRedirect(auth, provider);
     }
     if (e && e.code === "auth/popup-closed-by-user") return null;
+    // Say exactly which address Firebase refused, so it can be added (or the odd browser spotted).
+    if (e && e.code === "auth/unauthorized-domain") {
+      const framed = (() => { try { return window.top !== window.self; } catch (x) { return true; } })();
+      throw new Error(`Sign-in isn't allowed from "${location.hostname || location.protocol}". ` +
+        `The teacher needs to add exactly ${location.hostname || "this address"} in Firebase → Authentication → Settings → Authorized domains (project ${firebaseConfig.projectId})` +
+        (framed ? ". This page is open inside another page: open it in its own browser tab." : ". If that address is already listed, try a private window or another browser: an extension may be interfering."));
+    }
     throw e;
   }
 }
