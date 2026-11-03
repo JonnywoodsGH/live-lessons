@@ -212,6 +212,8 @@ body.present.hud-awake .corner-code { opacity: 1; }
 .q-status { position: absolute; top: 1.2cqw; right: 1.4cqw; z-index: 4; background: rgba(22,50,79,.92); color: #fff; font: 700 1.35cqw var(--sans); padding: .6cqw 1.2cqw; border-radius: 99px; display: flex; gap: .4cqw; }
 .q-status.live { background: rgba(28,122,85,.95); }
 .q-status #pclock.warn { color: #ffd2c2; }
+.deck-clock { position: absolute; z-index: 4; display: flex; align-items: center; justify-content: center; box-sizing: border-box; background: #16324F; color: #fff; border-radius: 99px; font-family: var(--mono); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.deck-clock.warn { background: #B4372B; }
 .res-panel { position: absolute; right: 2cqw; bottom: 5cqw; width: 38cqw; background: rgba(255,255,255,.97); border-radius: 1.2cqw; box-shadow: 0 1cqw 4cqw rgba(0,0,0,.2); padding: 1.2cqw 1.6cqw; font-size: 1.25cqw; z-index: 4; }
 .res-panel .rr { display: grid; grid-template-columns: 1.6cqw 1fr 10cqw 3.5cqw; gap: .8cqw; align-items: center; padding: .25cqw 0; }
 .res-panel .rt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

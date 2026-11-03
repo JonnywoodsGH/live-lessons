@@ -127,6 +127,9 @@ function renderOverlay() {
     const vks = S.qs.ids, open = !!(S.open && S.open[vks[0]]);
     const done = Object.keys(PRES).filter((u) => vks.every((vk) => VOTES[vk] && VOTES[vk][u])).length;
     html += `<div class="q-status ${open ? "live" : ""}"><span id="pclock"></span><span>${open ? "Answer on your device" : "Closed"} · ${done}${joined ? " / " + joined : ""} done</span></div>`;
+    // the deck's own timer on a question slide shows the live countdown (the one students see)
+    const tbox = S.timer !== false && S.qs.openedAt ? deckTimerBox() : "";
+    if (tbox) html += `<div class="deck-clock" id="dclock" style="${tbox}"></div>`;
     // one-word question on a deck slide: the cloud floats over the slide
     if (S.qs.type === "word") {
       const vk = vks[0], q = LESSON.questions[L.baseId(vk)] || {};
@@ -148,11 +151,36 @@ function wordAreaStyle() {
   } catch (e) { return ""; }
 }
 function paintClock() {
-  const el = document.getElementById("pclock"); if (!el) return;
   const left = L.secondsLeft(S, offset);
-  el.textContent = left == null ? "" : `⏱ ${fmtSecs(left)}  `;
-  el.classList.toggle("warn", left != null && left <= 5);
+  const el = document.getElementById("pclock");
+  if (el) { el.textContent = left == null ? "" : `⏱ ${fmtSecs(left)}  `; el.classList.toggle("warn", left != null && left <= 5); }
+  const dc = document.getElementById("dclock");
+  if (dc) { dc.textContent = fmtSecs(left == null ? 0 : left); dc.classList.toggle("warn", left == null || left <= 5); }
+  markDeckTimer(!!dc);
 }
+/** Where the deck's own timer sits on the current slide (so the live countdown can cover it). */
+function deckTimerBox() {
+  try {
+    const d = deck.frame && deck.frame.contentDocument, a = d && d.querySelector(".slide.active .timer");
+    if (!a) return "";
+    const b = a.getBoundingClientRect(), f = deck.frame.getBoundingClientRect(), st = $("#stage").getBoundingClientRect();
+    if (!b.width || !b.height) return "";
+    return `left:${b.left + f.left - st.left}px;top:${b.top + f.top - st.top}px;width:${b.width}px;height:${b.height}px;font-size:${Math.round(b.height * 0.55)}px`;
+  } catch (e) { return ""; }
+}
+/** Hide the deck's own (unlinked) timer while the live countdown covers it. */
+function markDeckTimer(on) {
+  try {
+    const d = deck.frame && deck.frame.contentDocument; if (!d) return;
+    if (!d.getElementById("ll-timer-style")) {
+      const st = d.createElement("style"); st.id = "ll-timer-style";
+      st.textContent = "html.ll-live-timer .slide.active .timer{visibility:hidden!important}";
+      d.head.appendChild(st);
+    }
+    d.documentElement.classList.toggle("ll-live-timer", on);
+  } catch (e) {}
+}
+addEventListener("resize", () => { if (S && S.qs && lastMode === "html") renderOverlay(); });
 function resultsRows() {
   return S.qs.ids.map((vk) => {
     const q = LESSON.questions[L.baseId(vk)] || {}, item = S.qs.items[vk] || {};
@@ -316,6 +344,7 @@ function deckGoto(n, st) {
 
 function deckMoved(n, st) {
   deck.state = { n, step: st };
+  clearTimeout(deck.reT); deck.reT = setTimeout(() => { if (S) renderOverlay(); }, 450);   // re-place the live clock once the slide has settled
   if (deck.sync) return;                                                    // we asked for this
   if (deck.expect && deck.expect.n === n && deck.expect.step === st) { deck.expect = null; return; }
   // the teacher moved the deck itself (slide menu, typed number, swipe, R to restart builds) → follow it
