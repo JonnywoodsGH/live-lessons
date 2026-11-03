@@ -119,6 +119,7 @@ function renderStart(lessons) {
 function renderAdd() {
   const el = $("#addCard");
   el.innerHTML = `<div class="kicker">Add</div><h2>Add or update a lesson</h2>
+    <p class="small"><a href="builder.html">✎ Question builder</a> <span class="muted">· add hinge or one-word questions to a deck, or make the question file for a PDF</span></p>
     <label class="field"><span>Lesson ID</span><input type="text" id="lid" placeholder="Y9-W12-L1"></label>
     <label class="field"><span>Title</span><input type="text" id="ltitle" placeholder="Pseudocode"></label>
     <label class="field"><span>Slides — an interactive deck (.html), one PDF, or all the slide images</span><input type="file" id="lfiles" accept=".html,.htm,text/html,.pdf,application/pdf,image/*" multiple></label>
