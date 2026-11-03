@@ -1,13 +1,18 @@
 // Builds the Realtime Database security rules from config.js (shown on setup.html to copy into Firebase).
 //  • Teacher (your email) — everything.
 //  • Students (school domain) — read the session they joined + the current slide; write only their own
-//    vote, only while that question is open; read only their own vote. They never see answers,
-//    other students' votes, the lesson file or any slide you haven't shown yet.
+//    answer, only while that question is open (or any time in a student-paced assignment, once);
+//    read the correct answer only AFTER they have answered (instant feedback / student-paced) or after
+//    you reveal it. They never see other students' answers, the lesson file or slides not yet shown.
 export function buildRules(teacherEmails, schoolDomain) {
   const q = (s) => "'" + String(s).toLowerCase().replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
   const T = "(auth != null && auth.token.email_verified == true && (" +
     teacherEmails.map((e) => `auth.token.email.toLowerCase() == ${q(e)}`).join(" || ") + "))";
   const S = `(auth != null && auth.token.email_verified == true && (auth.token.email.toLowerCase().endsWith(${q("@" + schoolDomain)}) || ${T}))`;
+  const sess = (f) => `root.child('sessions').child($code).child('${f}')`;
+  const live = `${sess("mode")}.val() != 'self'`;
+  const self = `${sess("mode")}.val() == 'self'`;
+  const active = `${sess("active")}.val() == true`;
   return {
     rules: {
       lessons: { ".read": T, ".write": T },
@@ -17,19 +22,44 @@ export function buildRules(teacherEmails, schoolDomain) {
       teacher: { ".read": T, ".write": T },
       sessions: { ".read": T, ".write": T, $code: { ".read": S } },
       now: { $code: { ".read": S, ".write": T } },
+      selfpack: { $code: { ".read": `${S} && ${self} && ${active}`, ".write": T } },
+      keys: {
+        ".read": T, ".write": T,
+        $code: {
+          $vk: {
+            ".read": `auth != null && root.child('votes').child($code).child($vk).child(auth.uid).exists() && (${sess("feedback")}.val() == 'instant' || ${self} || ${sess("reveal")}.child($vk).exists())`,
+          },
+        },
+      },
       votes: {
         $code: {
           ".read": T, ".write": T,
-          $qkey: {
+          $vk: {
             $uid: {
               ".read": "auth != null && auth.uid == $uid",
-              ".write": `${S} && auth.uid == $uid && root.child('sessions').child($code).child('active').val() == true && root.child('sessions').child($code).child('q').child('key').val() == $qkey && root.child('sessions').child($code).child('q').child('open').val() == true`,
-              ".validate": "newData.hasChildren(['a', 't'])",
-              a: { ".validate": "newData.isString() && newData.val().matches(/^[A-F]$/)" },
-              t: { ".validate": "newData.val() == now" },
+              ".write": `${S} && auth.uid == $uid && ${active} && ((${self} && !data.exists()) || (${live} && ${sess("open")}.child($vk).val() == true && (!data.exists() || ${sess("feedback")}.val() == 'reveal')))`,
+              ".validate": "newData.hasChild('t') && (newData.hasChild('a') || newData.hasChild('w'))",
+              a: { ".validate": "newData.isString() && newData.val().matches(/^[A-F1-6]$/)" },
+              w: { ".validate": "newData.isString() && newData.val().matches(/^[^ ]{1,30}$/)" },
               c: { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 4" },
+              t: { ".validate": "newData.val() == now" },
               $other: { ".validate": false },
             },
+          },
+        },
+      },
+      progress: {
+        $code: {
+          ".read": T, ".write": T,
+          $uid: {
+            ".read": "auth != null && auth.uid == $uid",
+            ".write": `${S} && auth.uid == $uid && ${self} && ${active}`,
+            pos: { ".validate": "newData.isNumber()" },
+            step: { ".validate": "newData.isNumber()" },
+            t: { ".validate": "newData.val() == now" },
+            done: { ".validate": "newData.isBoolean()" },
+            seen: { $vk: { ".validate": "(!data.exists() && newData.val() == now) || data.val() == newData.val()" } },
+            $other: { ".validate": false },
           },
         },
       },

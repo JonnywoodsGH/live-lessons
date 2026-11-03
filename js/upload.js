@@ -2,6 +2,7 @@
 // Everything is turned into JPEGs in the browser and stored in the teacher-only part of the database,
 // so slide images and answers never sit in the public website/repo.
 import { r, set, update, serverTimestamp } from "./fb.js";
+import { detectQuestions } from "./questions.js";
 
 const MAX_W = 1280, QUALITY = 0.8;
 const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
@@ -49,52 +50,71 @@ async function pdfToJpegs(file, onPage) {
   return out;
 }
 
-/** Read an interactive HTML deck: its slides (<section class="slide">), build counts, CSS and footer text. */
+/** Read an interactive HTML deck: slides (<section class="slide">), builds, questions, CSS and footer text. */
 export function parseDeck(text) {
   const doc = new DOMParser().parseFromString(text, "text/html");
   let secs = [...doc.querySelectorAll("#stage > .slide")];
   if (!secs.length) secs = [...doc.querySelectorAll("section.slide, .slide")];
   if (!secs.length) throw new Error("This HTML file has no slides (<section class=\"slide\">) — is it one of the interactive decks?");
+  const questions = {};
   const sections = secs.map((sec, n) => {
     let max = 0;
     sec.querySelectorAll("[data-step],[data-play],[data-start-at]").forEach((e) => {
       max = Math.max(max, +(e.getAttribute("data-step") || e.getAttribute("data-play") || e.getAttribute("data-start-at") || 0) || 0);
     });
-    return { n, html: sec.outerHTML, max, title: sec.getAttribute("data-title") || `Slide ${n + 1}` };
+    const clean = sec.cloneNode(true);
+    const found = detectQuestions(clean, n); // strips answer attributes from the copy that students' slides come from
+    let q = null;
+    if (found) {
+      found.ids = found.ids.map((id) => {
+        let nid = id, k = 2;
+        while (questions[nid]) nid = `${id}-${k++}`;            // two hinges with the same id in one deck
+        questions[nid] = { ...found.items[id], id: nid };
+        return nid;
+      });
+      q = { type: found.type, ids: found.ids, time: found.time, title: (found.title || "").slice(0, 140) };
+    }
+    return { n, html: clean.outerHTML, max, title: sec.getAttribute("data-title") || `Slide ${n + 1}`, q };
   });
   const css = [...doc.head.querySelectorAll('style, link[rel="stylesheet"]')].map((e) => e.outerHTML).join("\n");
   const scripts = [...doc.querySelectorAll("script")].map((x) => x.textContent).join("\n");
   const m = /textContent\s*=\s*(['"`])([^'"`]*)\1\s*\+\s*s\.dataset\.foot/.exec(scripts);
-  return { sections, css, foot: m ? m[2] : "", full: text };
+  // the projector runs the deck exactly as you made it (teacher-only)
+  return { sections, questions, css, foot: m ? m[2] : "", full: text };
 }
 
 const natural = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
 
-/** Check the hinge file and return {hinges: {H1: {...}}, list: [...]} or throw a readable error. */
+/** Extra questions from a JSON file (used for PDF lessons). Returns {questions: {id: Q}, list}. */
 export function parseHinges(text, slideCount) {
   let data;
-  try { data = JSON.parse(text); } catch (e) { throw new Error("The hinge file isn't valid JSON: " + e.message); }
-  const list = Array.isArray(data) ? data : data.hinges;
-  if (!Array.isArray(list)) throw new Error('The hinge file needs a "hinges" list.');
-  const hinges = {};
+  try { data = JSON.parse(text); } catch (e) { throw new Error("The question file isn't valid JSON: " + e.message); }
+  const list = Array.isArray(data) ? data : data.hinges || data.questions;
+  if (!Array.isArray(list)) throw new Error('The question file needs a "hinges" list.');
+  const questions = {};
   list.forEach((h, i) => {
-    const where = `Hinge ${i + 1}${h && h.id ? " (" + h.id + ")" : ""}`;
+    const where = `Question ${i + 1}${h && h.id ? " (" + h.id + ")" : ""}`;
     if (!h || !h.id || !/^[A-Za-z0-9_-]+$/.test(h.id)) throw new Error(`${where}: needs an "id" made of letters, numbers, - or _.`);
-    if (hinges[h.id]) throw new Error(`${where}: the id is used twice.`);
+    if (questions[h.id]) throw new Error(`${where}: the id is used twice.`);
     if (!h.prompt) throw new Error(`${where}: needs a "prompt".`);
-    const opts = Object.keys(h.options || {}).filter((k) => /^[A-F]$/.test(k) && h.options[k] !== "");
-    if (opts.length < 2) throw new Error(`${where}: needs at least two options A–F.`);
-    if (h.correct && !opts.includes(h.correct)) throw new Error(`${where}: "correct" must be one of ${opts.join(", ")}.`);
     const after = Number(h.after);
     if (!Number.isInteger(after) || after < 0 || after > slideCount) throw new Error(`${where}: "after" must be a slide number from 0 to ${slideCount}.`);
-    hinges[h.id] = {
-      id: h.id, after, prompt: String(h.prompt), code: h.code ? String(h.code) : "",
-      options: Object.fromEntries(opts.map((k) => [k, String(h.options[k])])),
+    const type = h.type === "word" ? "word" : "mcq";
+    const base = { id: h.id, type, after, prompt: String(h.prompt), explain: h.explain || h.teacher_note || "", time: +h.time || (type === "word" ? 45 : 30) };
+    if (type === "word") {
+      questions[h.id] = { ...base, accept: (h.accept || []).map(String) };
+      return;
+    }
+    const opts = Object.keys(h.options || {}).filter((k) => /^[A-F1-6]$/.test(k) && h.options[k] !== "");
+    if (opts.length < 2) throw new Error(`${where}: needs at least two options A–F.`);
+    if (h.correct && !opts.includes(h.correct)) throw new Error(`${where}: "correct" must be one of ${opts.join(", ")}.`);
+    questions[h.id] = {
+      ...base, code: h.code ? String(h.code) : "", options: Object.fromEntries(opts.map((k) => [k, String(h.options[k])])),
       correct: h.correct || "", misconceptions: h.misconceptions || {}, notes: h.notes || {},
       confidence: h.confidence !== false, teacher_note: h.teacher_note || "",
     };
   });
-  return { hinges, list: Object.values(hinges) };
+  return { questions, list: Object.values(questions) };
 }
 
 export async function uploadLesson({ id, title, slideFiles, hingeText, onProgress = () => {} }) {
@@ -120,12 +140,12 @@ export async function uploadLesson({ id, title, slideFiles, hingeText, onProgres
     }
   }
 
-  const { hinges, list } = hingeText ? parseHinges(hingeText, jpegs.length) : { hinges: {}, list: [] };
+  const { questions, list } = hingeText ? parseHinges(hingeText, jpegs.length) : { questions: {}, list: [] };
   const order = [];
-  list.filter((h) => h.after === 0).forEach((h) => order.push({ t: "hinge", id: h.id }));
+  list.filter((h) => h.after === 0).forEach((h) => order.push({ t: "q", id: h.id }));
   jpegs.forEach((_, n) => {
     order.push({ t: "img", n });
-    list.filter((h) => h.after === n + 1).forEach((h) => order.push({ t: "hinge", id: h.id }));
+    list.filter((h) => h.after === n + 1).forEach((h) => order.push({ t: "q", id: h.id }));
   });
 
   onProgress("Uploading…", 0.42);
@@ -136,21 +156,24 @@ export async function uploadLesson({ id, title, slideFiles, hingeText, onProgres
   }
   const kb = Math.round(jpegs.reduce((s, j) => s + j.length, 0) / 1024);
   await set(r(`lessons/${id}`), {
-    id, title: (title || id).trim(), slideCount: jpegs.length, order, hinges, sizeKB: kb, uploadedAt: serverTimestamp(),
+    id, kind: "img", title: (title || id).trim(), slideCount: jpegs.length, order, questions, sizeKB: kb, uploadedAt: serverTimestamp(),
   });
   onProgress("Done", 1);
-  return { id, slides: jpegs.length, hinges: list.length, kb };
+  return { id, slides: jpegs.length, questions: list.length, kb };
 }
 
 async function uploadDeck({ id, title, htmlFile, hingeText, onProgress }) {
   onProgress("Reading the deck…", 0.05);
   const deck = parseDeck(await htmlFile.text());
-  const { hinges, list } = hingeText ? parseHinges(hingeText, deck.sections.length) : { hinges: {}, list: [] };
+  const extra = hingeText ? parseHinges(hingeText, deck.sections.length) : { questions: {}, list: [] };
+  const questions = { ...deck.questions, ...extra.questions };
   const order = [];
-  list.filter((h) => h.after === 0).forEach((h) => order.push({ t: "hinge", id: h.id }));
+  extra.list.filter((h) => h.after === 0).forEach((h) => order.push({ t: "q", id: h.id }));
   deck.sections.forEach((sec) => {
-    order.push({ t: "html", n: sec.n, max: sec.max, title: sec.title.slice(0, 120) });
-    list.filter((h) => h.after === sec.n + 1).forEach((h) => order.push({ t: "hinge", id: h.id }));
+    const it = { t: "html", n: sec.n, max: sec.max, title: sec.title.slice(0, 120) };
+    if (sec.q) it.q = sec.q;
+    order.push(it);
+    extra.list.filter((h) => h.after === sec.n + 1).forEach((h) => order.push({ t: "q", id: h.id }));
   });
   onProgress("Uploading…", 0.1);
   await set(r(`slides/${id}`), null);
@@ -163,13 +186,13 @@ async function uploadDeck({ id, title, htmlFile, hingeText, onProgress }) {
   await set(r(`decks/${id}`), deck.full);
   const kb = Math.round((deck.full.length + deck.sections.reduce((t, x) => t + x.html.length, 0)) / 1024);
   await set(r(`lessons/${id}`), {
-    id, kind: "html", title: (title || id).trim(), slideCount: deck.sections.length, order, hinges, sizeKB: kb, uploadedAt: serverTimestamp(),
+    id, kind: "html", title: (title || id).trim(), slideCount: deck.sections.length, order, questions, sizeKB: kb, uploadedAt: serverTimestamp(),
   });
   onProgress("Done", 1);
-  return { id, slides: deck.sections.length, hinges: list.length, kb };
+  return { id, slides: deck.sections.length, questions: Object.keys(questions).length, kb };
 }
 
 export async function deleteLesson(id) {
-  const u = {}; u[`lessons/${id}`] = null; u[`slides/${id}`] = null; u[`shells/${id}`] = null; u[`decks/${id}`] = null;
+  const u = {}; u[`lessons/${id}`] = null; u[`slides/${id}`] = null; u[`shells/${id}`] = null; u[`decks/${id}`] = null; u[`packs/${id}`] = null;
   await update(r("/"), u);
 }
