@@ -22,9 +22,9 @@ export const TEACHER_EMAILS = ["v.johnwa@vinschool.edu.vn"];
 
 // 3. The part after @ in the Google accounts that can join as students. One domain, or a list.
 //    "*" = ANY Google account can join as a student. Teachers are still only TEACHER_EMAILS.
-//    Testing: school accounts plus personal Gmail accounts. After testing, set it back to
-//    ["stu.vinschool.edu.vn"] and re-publish the rules from setup.html.
-export const SCHOOL_DOMAIN = ["stu.vinschool.edu.vn", "vinschool.edu.vn", "gmail.com"];
+//    Students (@stu…) and staff accounts (@vinschool…, e.g. colleagues testing as students).
+//    For students only, use ["stu.vinschool.edu.vn"]. Re-publish the rules from setup.html after a change.
+export const SCHOOL_DOMAIN = ["stu.vinschool.edu.vn", "vinschool.edu.vn"];
 
 // 4. Students' notes by email (optional). Paste the "Web app URL" from Google Apps Script here —
 //    setup.html has the script and the steps. Leave it "" and students can still take notes and
