@@ -23,7 +23,16 @@
   #preview { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 10px; background: #0e1b2a; box-shadow: var(--shadow); }
   #problems { margin: 0; padding-left: 1.2rem; color: var(--bad); font-size: .9rem; }
   body[data-mode="html"] .pdf-only, body[data-mode="pdf"] .html-only { display: none !important; }
-  body[data-qtype="mcq"] .word-only, body[data-qtype="word"] .mcq-only { display: none !important; }
+  /* each question type shows only its own fields */
+  body:not([data-qtype="mcq"]):not([data-qtype="multi"]) .mcq-only,
+  body:not([data-qtype="word"]) .word-only, body:not([data-qtype="tile"]) .tile-only, body:not([data-qtype="fill"]) .fill-only,
+  body[data-qtype="mcq"] .multi-only, body:not([data-qtype="mcq"]) .single-only, body:not([data-qtype="multi"]) .multi-only,
+  body:not([data-qtype="fill"]) .not-fill-hint, body[data-qtype="fill"] .prompt-plain { display: none !important; }
+  body[data-qtype="mcq"] .opt.extra { display: none !important; }
+  .tiles-in { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; }
+  .tiles-in .tl { display: grid; gap: .25rem; border: 1px solid var(--line); border-radius: 10px; padding: .45rem; background: #fff; }
+  .tiles-in .tl span { font-size: .8rem; font-weight: 700; color: var(--muted); display: flex; justify-content: space-between; }
+  @media (max-width: 600px) { .tiles-in { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .bad { color: var(--bad); }
   #added ol { margin: .3rem 0 0; padding-left: 1.3rem; display: grid; gap: .3rem; }
 </style>
@@ -54,15 +63,30 @@
         <div class="kicker">2 · The question</div>
         <div class="seg">
           <label><input type="radio" name="qtype" value="mcq" checked> Hinge question (A–D)</label>
+          <label><input type="radio" name="qtype" value="multi"> More than one answer</label>
+          <label><input type="radio" name="qtype" value="tile"> Select the right tile</label>
+          <label><input type="radio" name="qtype" value="fill"> Fill in the blanks</label>
           <label><input type="radio" name="qtype" value="word"> One word (word cloud)</label>
         </div>
-        <label class="field"><span>Question</span><textarea id="prompt" placeholder="e.g. Which memory loses its contents when the power is turned off?"></textarea></label>
+        <label class="field"><span><span class="prompt-plain">Question</span><span class="fill-only">The sentence <span class="muted small">— put each answer in [square brackets]; other accepted answers after a | e.g. [sensor|sensors]</span></span></span><textarea id="prompt" placeholder="e.g. Which memory loses its contents when the power is turned off?"></textarea></label>
+        <p class="small muted fill-only" id="fillInfo"></p>
 
         <div class="mcq-only stack">
           <label class="chk small"><input type="checkbox" id="isCode"> The options are code or pseudocode (show them in a code font)</label>
-          <div class="small muted">Fill in 2 to 4 options, tick the right one, and say why each wrong one is wrong. Students see that as "Why not B". The misconception ID (e.g. MC-RAM-01) is optional; it goes in the CSV export so you can track that misconception across lessons.</div>
+          <div class="small muted single-only">Fill in 2 to 4 options, tick the right one, and say why each wrong one is wrong. Students see that as "Why not B". The misconception ID (e.g. MC-RAM-01) is optional; it goes in the CSV export so you can track that misconception across lessons.</div>
+          <div class="small muted multi-only">Fill in 3 to 6 options and tick <b>every</b> right one. Students must tick exactly those to score. Saying why a wrong option is wrong is optional (students who tick it see it as "Why not B").</div>
           <div class="stack" id="opts"></div>
           <label class="field"><span>Decide <span class="muted small">(what you'll do if many get it wrong; shown after the answer)</span></span><input type="text" id="decide" placeholder="e.g. Ask: does the data survive a power cut? If not, it's volatile."></label>
+        </div>
+
+        <div class="tile-only stack">
+          <div class="small muted">Fill in 3 to 9 short tiles (a word, number or symbol each) and choose the right one. Students tap one tile.</div>
+          <div class="tiles-in" id="tiles"></div>
+          <label class="field"><span>Short explanation <span class="muted small">(optional, shown with the answer)</span></span><input type="text" id="texplain"></label>
+        </div>
+
+        <div class="fill-only stack">
+          <label class="field"><span>Short explanation <span class="muted small">(optional, shown with the answers)</span></span><input type="text" id="fexplain"></label>
         </div>
 
         <div class="word-only stack">
@@ -100,12 +124,14 @@
   </div>
 </main>
 <script type="module">
-  const L = ["A", "B", "C", "D"];
-  document.getElementById("opts").innerHTML = L.map((k, i) => `<div class="opt">
+  const L = ["A", "B", "C", "D", "E", "F"];
+  document.getElementById("opts").innerHTML = L.map((k, i) => `<div class="opt ${i > 3 ? "extra" : ""}">
     <span class="l">${k}</span><input type="text" id="o${i}" placeholder="Option ${k}">
-    <label class="rt"><input type="radio" name="right" value="${k}"> right</label>
+    <label class="rt single-only"><input type="radio" name="right" value="${k}"> right</label>
+    <label class="rt multi-only"><input type="checkbox" class="rightc" value="${k}"> right</label>
     <div class="wrong"><input type="text" id="w${i}" placeholder="Why ${k} is wrong"><input type="text" id="m${i}" placeholder="MC-… (optional)"></div>
   </div>`).join("");
+  document.getElementById("tiles").innerHTML = "ABCDEFGHI".split("").map((k, i) => `<div class="tl"><span>${k}<label><input type="radio" name="rtile" value="${k}"> right</label></span><input type="text" id="t${i}" placeholder="Tile ${k}" maxlength="40"></div>`).join("");
   const { init } = await import("./js/builder.js");
   init();
 </script>

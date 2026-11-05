@@ -2,7 +2,12 @@
 // so the data sets can sit side by side (same lesson IDs, item IDs and misconception IDs).
 import { read } from "./fb.js";
 import { loadLesson, baseId } from "./session.js";
-import { normWord } from "./ui.js";
+import { isRight, answerText, letters } from "./qtypes.js";
+
+const ACTIVITY = {
+  word: ["one word", "word cloud"], card: ["whole-class check", "whole-class response"], mcq: ["hinge", "hinge question"],
+  multi: ["more than one answer", "hinge question (select all)"], tile: ["select the right tile", "hinge question (tiles)"], fill: ["fill in the blanks", "retrieval (cloze)"],
+};
 
 const COLS = ["response_id", "timestamp", "session_id", "mode", "join_code", "date", "class", "lesson_id", "item_id", "question_type",
   "round", "student_name", "student_email", "answer", "correct", "misconception_id", "confidence", "time_taken_s", "points",
@@ -32,12 +37,13 @@ export async function rowsForSession(s, roster, lessonCache = {}) {
       const v = kv[uid], who = roster[uid] || {};
       let ans = "", correct = "", mc = "";
       if (v) {
-        if (q.type === "word") {
-          ans = v.w || "";
-          if (q.accept && q.accept.length) correct = q.accept.map(normWord).includes(normWord(ans)) ? "TRUE" : "FALSE";
-        } else {
-          ans = v.a || "";
-          if (q.correct) { correct = ans === q.correct ? "TRUE" : "FALSE"; if (ans !== q.correct) mc = (q.misconceptions || {})[ans] || ""; }
+        ans = answerText(q, v);
+        const ok = isRight(q, v);
+        if (ok != null) correct = ok ? "TRUE" : "FALSE";
+        if (ok === false && q.misconceptions) {
+          // the misconception of each wrong option chosen (for "more than one answer", every wrongly ticked one)
+          const wrong = q.type === "multi" ? letters(v.a).split("").filter((k) => !letters(q.correct).includes(k)) : [v.a];
+          mc = [...new Set(wrong.map((k) => q.misconceptions[k]).filter(Boolean))].join(";");
         }
       }
       const start = s.mode === "self" ? progress[uid] && progress[uid].seen && progress[uid].seen[vk] : (s.opened || {})[vk];
@@ -48,8 +54,7 @@ export async function rowsForSession(s, roster, lessonCache = {}) {
         join_code: s.code, date: dateOnly(s.startedAt), class: s.cls, lesson_id: s.lessonId, item_id: `${s.lessonId}-${id}`,
         question_type: kind, round, student_name: who.n || "", student_email: who.e || "",
         answer: ans || "(no answer)", correct, misconception_id: mc, confidence: v && v.c ? v.c : "", time_taken_s: secs, points: pts,
-        activity: kind === "word" ? "one word" : kind === "card" ? "whole-class check" : "hinge",
-        afl_strategy: kind === "word" ? "word cloud" : kind === "card" ? "whole-class response" : "hinge question",
+        activity: (ACTIVITY[kind] || ACTIVITY.mcq)[0], afl_strategy: (ACTIVITY[kind] || ACTIVITY.mcq)[1],
         time_away_s: s.mode !== "self" ? (away[uid] && +away[uid].w) || 0 : "",
       });
     });

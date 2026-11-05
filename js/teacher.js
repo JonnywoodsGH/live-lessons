@@ -2,7 +2,8 @@
 import { configured, onUser, signIn, logOut, isTeacher, watch, read, set, r } from "./fb.js";
 import { DEFAULT_CLASS, NOTES_EMAIL_URL } from "./config.js";
 import { AWAY_MIN, awayText } from "./away.js";
-import { $, esc, toast, joinUrl, tally, hingeSlideHtml, fmtTime, cloudHtml, countWords, boardHtml, fmtSecs, encodeKey, normS } from "./ui.js";
+import { $, esc, toast, joinUrl, tally, hingeSlideHtml, fillSlideHtml, fillStats, fmtTime, cloudHtml, countWords, boardHtml, fmtSecs, encodeKey, normS } from "./ui.js";
+import { TYPE_NAME, SHORT_NAME, isRight, answerText } from "./qtypes.js";
 import * as L from "./session.js";
 import { uploadLesson, deleteLesson } from "./upload.js";
 import { rowsForSession, toCsv, download } from "./export.js";
@@ -48,9 +49,10 @@ const qCount = (l) => {
   const words = qs.filter((q) => q.type === "word").length;
   const parts = [];
   if (sets) parts.push(`${sets} card set${sets > 1 ? "s" : ""}`);
-  const hinge = qs.filter((q) => q.type !== "word" && !q.card).length;
+  const hinge = qs.filter((q) => (q.type || "mcq") === "mcq" && !q.card).length;
   if (hinge) parts.push(`${hinge} hinge`);
   if (words) parts.push(`${words} one-word`);
+  [["multi", "more-than-one-answer"], ["tile", "tile"], ["fill", "fill-in-the-blanks"]].forEach(([t, nm]) => { const n = qs.filter((q) => q.type === t).length; if (n) parts.push(`${n} ${nm}`); });
   return parts.length ? `${qs.length} questions (${parts.join(", ")})` : "no questions";
 };
 
@@ -119,14 +121,14 @@ function renderStart(lessons) {
 function renderAdd() {
   const el = $("#addCard");
   el.innerHTML = `<div class="kicker">Add</div><h2>Add or update a lesson</h2>
-    <p class="small"><a href="builder.html">✎ Question builder</a> <span class="muted">· add hinge or one-word questions to a deck, or make the question file for a PDF</span></p>
+    <p class="small"><a href="builder.html">✎ Question builder</a> <span class="muted">· add hinge, more-than-one-answer, tile, fill-in-the-blank or one-word questions to a deck, or make the question file for a PDF</span></p>
     <label class="field"><span>Lesson ID</span><input type="text" id="lid" placeholder="Y9-W12-L1"></label>
     <label class="field"><span>Title</span><input type="text" id="ltitle" placeholder="Pseudocode"></label>
     <label class="field"><span>Slides — an interactive deck (.html), one PDF, or all the slide images</span><input type="file" id="lfiles" accept=".html,.htm,text/html,.pdf,application/pdf,image/*" multiple></label>
     <label class="field"><span>Extra questions file (optional .json — for PDF lessons)</span><input type="file" id="lhinge" accept=".json,application/json"></label>
     <div class="progress hidden" id="lprog"><div></div></div><p class="small muted" id="lmsg"></p>
     <button class="btn accent" id="lgo">Upload lesson</button>
-    <p class="small muted">Questions in interactive decks are found automatically: fingers-up card slides, hinge slides and one-word slides. Same ID again replaces the lesson.</p>`;
+    <p class="small muted">Questions in interactive decks are found automatically: fingers-up card slides, hinge slides, one-word slides and the question builder's slides. Same ID again replaces the lesson.</p>`;
   $("#lfiles").onchange = (e) => {
     const f = [...e.target.files].find((x) => /\.html?$/i.test(x.name));
     if (f && !$("#lid").value) { const m = /Y9_W(\d+)(?:_L(\d))?/i.exec(f.name); if (m) $("#lid").value = `Y9-W${m[1]}-L${m[2] || 1}`; }
@@ -238,7 +240,6 @@ function buildSessionView() {
       <span class="spacer"></span>
       <span class="pill" id="joinedPill">0 joined</span>
       <a class="btn" href="present.html" target="ll_projector">Open projector view ↗</a>
-      <a class="btn" href="index.html?preview=1" target="ll_student" title="What students' devices show — for a second screen">Student view ↗</a>
       <button class="btn" id="joinBtn">Join screen <kbd>J</kbd></button>
       <button class="btn" id="boardBtn">Leaderboard <kbd>S</kbd></button>
       <button class="btn danger" id="endBtn">End lesson</button>
@@ -248,7 +249,7 @@ function buildSessionView() {
         <div class="stage" id="stage"><div id="stageDeck" class="fill hidden"></div><div id="stageOther" class="fill"></div></div>
         <div class="row"><button class="btn" id="prevBtn">◀ Prev</button><span class="spacer"></span><span id="posLbl" class="muted"></span><span class="spacer"></span><button class="btn primary" id="nextBtn">Next ▶</button></div>
         <div class="strip" id="strip"></div>
-        <p class="small muted">Keys: ← → move · V open/close a question · R results on the board · A reveal the answer · S leaderboard · J join screen · D student view (projector). A clicker that sends Page Up/Down also works.</p>
+        <p class="small muted">Keys: ← → move · V open/close a question · R results on the board · A reveal the answer · S leaderboard · J join screen. A clicker that sends Page Up/Down also works.</p>
       </section>
       <aside class="stack" id="side"></aside>
     </div>
@@ -291,7 +292,7 @@ function buildStrip() {
   const el = $("#strip");
   el.innerHTML = LESSON.order.map((it, i) => {
     const q = L.qsOf(LESSON, it);
-    const badge = q ? `<span class="qb">${q.type === "set" ? q.ids.length + " Qs" : q.type === "word" ? "word" : "Q"}</span>` : "";
+    const badge = q ? `<span class="qb">${q.type === "set" ? q.ids.length + " Qs" : SHORT_NAME[q.type] || "Q"}</span>` : "";
     if (it.t === "q") return `<button class="h" data-pos="${i}"><span class="n">${i + 1}</span>Question${badge}</button>`;
     if (it.t === "html") return `<button class="t" data-pos="${i}" title="${esc(it.title)}"><span class="n">${i + 1}</span><span class="tt">${esc(it.title)}</span>${badge}</button>`;
     return `<button data-pos="${i}"><span class="n">${i + 1}</span><img alt="" data-n="${it.n}">${badge}</button>`;
@@ -345,6 +346,7 @@ function renderStage() {
   if (it.t === "q" && S.qs) {
     const vk = S.qs.ids[0], item = S.qs.items[vk], q = LESSON.questions[L.baseId(vk)] || {};
     if (item && item.type === "word") { el.innerHTML = `<div class="hinge-slide"><div class="hs-top"><span class="hs-kicker">One word</span></div><h1 class="hs-prompt">${esc(item.prompt)}</h1>${cloudHtml(countWords(VOTES[vk], (S.hidden || {})[vk] || {}), { accept: q.accept })}</div>`; return; }
+    if (item && item.type === "fill") { el.innerHTML = fillSlideHtml({ ...item, round: S.qs.round }, { votes: VOTES[vk], blanks: q.blanks, showResults: true, reveal: S.reveal && S.reveal[vk], open: !!(S.open && S.open[vk]), closed: !(S.open && S.open[vk]) && S.closed && S.closed[vk], answered: Object.keys(VOTES[vk] || {}).length, joined: Object.keys(PRES).length }); return; }
     const counts = tally(VOTES[vk], Object.keys((item && item.options) || {}));
     el.innerHTML = hingeSlideHtml({ ...item, round: S.qs.round }, { counts, showResults: true, reveal: S.reveal && S.reveal[vk], open: !!(S.open && S.open[vk]), closed: !(S.open && S.open[vk]) && S.closed && S.closed[vk], answered: counts.total, joined: Object.keys(PRES).length });
     return;
@@ -387,7 +389,7 @@ function questionPanel() {
   qs.ids.forEach((vk) => Object.keys(VOTES[vk] || {}).forEach((u) => answeredBy.add(u)));
   const fully = here.filter((u) => qs.ids.every((vk) => VOTES[vk] && VOTES[vk][u]));
   const notDone = here.filter((u) => !fully.includes(u));
-  const label = qs.type === "set" ? `Card set · ${qs.ids.length} questions` : qs.type === "word" ? "One word" : "Hinge question";
+  const label = qs.type === "set" ? `Card set · ${qs.ids.length} questions` : TYPE_NAME[qs.type] || TYPE_NAME.mcq;
   let body = "";
   if (qs.type === "set") {
     body = `<table class="cards"><thead><tr><th></th><th>Card</th><th>Correct</th><th>Most common wrong</th></tr></thead><tbody>${qs.ids.map((vk) => {
@@ -408,16 +410,26 @@ function questionPanel() {
     body = `<div class="small muted">Tap a word to hide it from the board (tap again to show).</div>
       <div class="cloud-mod">${all.map((x) => `<button class="wtag ${hidden[encodeKey(x.k)] ? "off" : ""}" data-k="${esc(x.k)}">${esc(x.w)} <b>${x.n}</b></button>`).join("") || `<span class="muted">No words yet</span>`}</div>
       ${q.accept && q.accept.length ? `<div class="small muted">Accepted: ${esc(q.accept.join(" / "))}</div>` : ""}`;
+  } else if (qs.type === "fill") {
+    const vk = qs.ids[0], q = LESSON.questions[L.baseId(vk)] || {};
+    const v = Object.values(VOTES[vk] || {}), right = v.filter((x) => isRight(q, x)).length;
+    const pctAll = v.length ? Math.round((100 * right) / v.length) : null;
+    body = `<div class="fill-res">${fillStats(q.blanks, VOTES[vk]).map((b, i) => `<div class="fb-row"><div><b>Blank ${i + 1}</b> · <span class="pctb ${b.pct == null ? "" : b.pct >= 80 ? "ok" : b.pct >= 50 ? "mid" : "bad"}">${b.pct == null ? "–" : b.pct + "%"}</span> <span class="small muted">accepts ${esc((q.blanks[i] || []).join(" / "))}</span></div>
+      <div class="chips">${b.top.map((x) => `<span class="${x.ok ? "ok" : ""}">${esc(x.w)} <b>${x.n}</b></span>`).join("") || `<span class="muted small">No answers yet</span>`}</div></div>`).join("")}</div>
+      ${pctAll != null && !open ? `<div class="note">${pctAll}% got every blank right. ${pctAll >= 80 ? "Move on, and pick up the few who didn't." : "Re-teach the blank with the lowest score, then press <b>Ask again</b>."}</div>` : ""}`;
   } else {
     const vk = qs.ids[0], q = LESSON.questions[L.baseId(vk)] || {}, item = qs.items[vk] || {};
     const letters = Object.keys(item.options || {}), c = tally(VOTES[vk], letters);
     const max = Math.max(1, ...letters.map((l) => c[l] || 0));
-    const pctRight = c.total && q.correct ? Math.round(((c[q.correct] || 0) / c.total) * 100) : null;
-    const confWrong = q.correct ? Object.entries(VOTES[vk] || {}).filter(([, v]) => v.a !== q.correct && (v.c || 0) >= 3).map(([u, v]) => `${name(u)} (${v.a}, ${CONF_SHORT[v.c]})`) : [];
-    body = `<div class="bars">${letters.map((l) => {
-      const n = c[l] || 0, mc = l !== q.correct ? (q.misconceptions || {})[l] : "";
-      return `<div class="bar ${l === q.correct ? "correct" : ""}"><span class="l">${esc(l)}</span><span class="track"><span class="fill" style="width:${(n / max) * 100}%"></span></span><span class="num">${n}${c.total ? ` · ${Math.round((n / c.total) * 100)}%` : ""}</span>
-        ${mc || (q.notes || {})[l] ? `<span class="mc">${esc(mc || "")}${(q.notes || {})[l] ? " — " + esc(q.notes[l]) : ""}</span>` : l === q.correct ? `<span class="mc">correct answer</span>` : ""}</div>`;
+    const multi = q.type === "multi", isC = (l) => !!q.correct && (multi ? q.correct.includes(l) : l === q.correct);
+    const vs = Object.values(VOTES[vk] || {});
+    const pctRight = vs.length && q.correct ? Math.round((vs.filter((x) => isRight(q, x)).length / vs.length) * 100) : null;
+    const confWrong = q.correct ? Object.entries(VOTES[vk] || {}).filter(([, v]) => !isRight(q, v) && (v.c || 0) >= 3).map(([u, v]) => `${name(u)} (${answerText(q, v)}, ${CONF_SHORT[v.c]})`) : [];
+    body = `${multi ? `<div class="small muted">Bars: how many ticked each option. ${pctRight == null ? "" : `<b>${pctRight}%</b> ticked exactly the right ones.`}</div>` : ""}<div class="bars">${letters.map((l) => {
+      const n = c[l] || 0, mc = !isC(l) ? (q.misconceptions || {})[l] : "";
+      const txt = q.type === "tile" ? `<span class="mc">${esc((item.options || {})[l] || "")}${isC(l) ? " · correct tile" : ""}</span>` : "";
+      return `<div class="bar ${isC(l) ? "correct" : ""}"><span class="l">${esc(l)}</span><span class="track"><span class="fill" style="width:${(n / max) * 100}%"></span></span><span class="num">${n}${c.total ? ` · ${Math.round((n / c.total) * 100)}%` : ""}</span>
+        ${txt || (mc || (q.notes || {})[l] ? `<span class="mc">${esc(mc || "")}${(q.notes || {})[l] ? " — " + esc(q.notes[l]) : ""}</span>` : isC(l) ? `<span class="mc">correct answer</span>` : "")}</div>`;
     }).join("")}</div>
     ${pctRight != null && !open ? `<div class="note">${pctRight >= 80 ? "Most of the class has it: move on, and pick up the few who don't." : "Fewer than 80% correct: re-teach using the biggest wrong option, then press <b>Ask again</b>."}</div>` : ""}
     ${confWrong.length && !open ? `<div class="small"><b>Confident but wrong:</b> ${confWrong.map(esc).join(", ")}</div>` : ""}`;
@@ -526,7 +538,7 @@ function renderAssignment() {
     </tbody></table>`;
   const qrows = qids.map((id) => {
     const q = LESSON.questions[id], v = Object.values(VOTES[id] || {});
-    const right = q.type === "word" ? v.filter((x) => (q.accept || []).map((a) => a.toLowerCase()).includes(String(x.w || "").toLowerCase())).length : v.filter((x) => x.a === q.correct).length;
+    const right = v.filter((x) => isRight(q, x)).length;
     const pct = v.length ? Math.round((right / v.length) * 100) : null;
     return `<tr><td class="small"><b>${esc(id)}</b></td><td class="small ${q.mono ? "mono" : ""}">${esc((q.prompt || "").slice(0, 50))}</td><td><span class="pctb ${pct == null ? "" : pct >= 80 ? "ok" : pct >= 50 ? "mid" : "bad"}">${pct == null ? "–" : pct + "%"}</span> <span class="small muted">${v.length}</span></td></tr>`;
   }).join("");
