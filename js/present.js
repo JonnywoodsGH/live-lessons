@@ -3,7 +3,8 @@
 // Interactive HTML decks run as the real deck (builds, timers, animations, laser, blank screen),
 // driven in step with the live session.
 import { configured, onUser, signIn, isTeacher, watch, read } from "./fb.js";
-import { $, esc, joinUrl, shortJoinUrl, tally, hingeSlideHtml, cloudHtml, countWords, boardHtml, fmtSecs, normS } from "./ui.js";
+import { $, esc, joinUrl, shortJoinUrl, tally, hingeSlideHtml, fillSlideHtml, fillStats, cloudHtml, countWords, boardHtml, fmtSecs, normS } from "./ui.js";
+import { isRight } from "./qtypes.js";
 import * as L from "./session.js";
 import QR from "./qr.js";
 import { AWAY_MIN } from "./away.js";
@@ -27,9 +28,9 @@ function follow(code) {
   CODE = code; S = NOW = LESSON = null; PRES = {}; VOTES = {}; AWAY = {}; awayShown = 0;
   if (!code) return msg("No live lesson running.<br><span class='small'>Start one on the teacher page — this window will follow it.</span>");
   resetDeck();
-  app.innerHTML = `<div class="stage" id="stage"><div id="deckLayer" class="fill hidden"></div><div id="other" class="fill"></div><div id="ov" class="fill" style="pointer-events:none"></div><div id="awayBoard" class="away-board hidden"></div>
-    <div id="devView" class="dev-view ${devOn ? "" : "hidden"}"><div class="dev-label">Student view</div><div class="dev-screen"><iframe title="What students see" src="index.html?preview=1"></iframe></div></div></div>`;
-  fitDev();
+  app.innerHTML = `<div class="stage" id="stage"><div id="deckLayer" class="fill hidden"></div><div id="other" class="fill"></div><div id="ov" class="fill" style="pointer-events:none"></div><div id="awayBoard" class="away-board hidden"></div></div>
+    <aside id="joinSide" class="join-side hidden" aria-label="Join the lesson"></aside>`;
+  document.body.classList.remove("joining");
   subs.push(watch(`sessions/${code}`, async (v) => {
     S = normS(v);
     if (S) L.observe(code, S);
@@ -69,23 +70,6 @@ function chime() {
     });
   } catch (e) {}
 }
-/* ---- "Student view": a phone-sized mirror of what devices show (D or the bar) ---- */
-let devOn = false;
-try { devOn = localStorage.getItem("ll_devview") === "1"; } catch (e) {}
-function fitDev() {
-  const box = document.querySelector("#devView .dev-screen"), f = box && box.querySelector("iframe");
-  if (!f) return;
-  const sc = box.clientWidth / 390;
-  f.style.transform = `scale(${sc})`;
-}
-addEventListener("resize", fitDev);
-function toggleDev() {
-  devOn = !devOn;
-  try { localStorage.setItem("ll_devview", devOn ? "1" : "0"); } catch (e) {}
-  const el = $("#devView"); if (el) el.classList.toggle("hidden", !devOn);
-  fitDev(); hud();
-}
-
 let pubT = null;
 function schedulePublish() { clearTimeout(pubT); pubT = setTimeout(() => { if (S && LESSON) L.publish(CODE, S, LESSON, VOTES, ROSTER); }, 600); }
 
@@ -122,6 +106,10 @@ function standaloneHtml() {
     return `<div class="hinge-slide"><div class="hs-top"><span class="hs-kicker">One word</span><span class="hs-status ${open ? "live" : ""}">${open ? "Type your word" : "Closed"} · ${Object.keys(VOTES[vk] || {}).length}${joined ? " / " + joined : ""} answered</span></div>
       <h1 class="hs-prompt">${esc(item.prompt)}</h1>${show ? cloudHtml(countWords(VOTES[vk], (S.hidden || {})[vk] || {}), { accept: S.reveal && S.reveal[vk] ? q.accept : null }) : ""}</div>`;
   }
+  if (item.type === "fill") {
+    return fillSlideHtml({ ...item, round: S.qs.round }, { votes: VOTES[vk], blanks: q.blanks, showResults: !!S.results, reveal: S.reveal && S.reveal[vk], open,
+      closed: !open && S.closed && S.closed[vk], answered: Object.keys(VOTES[vk] || {}).length, joined });
+  }
   const counts = tally(VOTES[vk], Object.keys(item.options || {}));
   return hingeSlideHtml({ ...item, round: S.qs.round }, {
     counts, showResults: !!S.results, reveal: S.reveal && S.reveal[vk], open,
@@ -133,15 +121,7 @@ function renderOverlay() {
   const ov = $("#ov");
   if (!ov || !S) return;
   const joined = Object.keys(PRES).length;
-  if (S.join) {
-    let qr = "";
-    try { qr = QR.svg(joinUrl(CODE), 400); } catch (e) { qr = ""; }
-    ov.innerHTML = `<div class="join-overlay"><div class="qr">${qr}</div><div>
-      <h2>Join the lesson</h2><div class="url">${esc(shortJoinUrl())}</div>
-      <div class="big-code">${esc(CODE)}</div>
-      <div class="joined">${joined} joined · sign in with your school Google account</div></div></div>`;
-    return;
-  }
+  paintJoin(joined);
   if (S.board) {
     const { board } = L.computeScores(LESSON, S, VOTES, ROSTER);
     ov.innerHTML = `<div class="board-overlay"><h2>Leaderboard</h2>${boardHtml(board, { limit: 10 })}</div>`;
@@ -167,6 +147,29 @@ function renderOverlay() {
   ov.innerHTML = html;
   paintClock();
 }
+/** Join (J): the slides keep showing; the QR code and join code sit in a panel down the right-hand side. */
+let joinWas = null;
+function paintJoin(joined) {
+  const side = $("#joinSide"); if (!side) return;
+  const on = !!(S && S.join && S.active);
+  if (on) {
+    if (side.dataset.code !== CODE) {
+      let qr = "";
+      try { qr = QR.svg(joinUrl(CODE), 400); } catch (e) { qr = ""; }
+      side.innerHTML = `<h2>Join the lesson</h2><div class="qr">${qr}</div><div class="url">${esc(shortJoinUrl())}</div><div class="lbl">Code</div><div class="big-code">${esc(CODE)}</div><div class="joined" id="joinedN"></div>`;
+      side.dataset.code = CODE;
+    }
+    const n = $("#joinedN"); if (n) n.textContent = `${joined} joined · sign in with your school Google account`;
+  }
+  side.classList.toggle("hidden", !on);
+  document.body.classList.toggle("joining", on);
+  if (joinWas !== null && joinWas !== on) {
+    // the slide area just got narrower / wider: let the deck re-fit, then re-place the live clock
+    setTimeout(() => { if (lastMode === "html") fitDeck(); if (S) renderOverlay(); }, 350);
+  }
+  joinWas = on;
+}
+
 /** Put the live word cloud exactly over the deck's "words appear here" area, if the slide has one. */
 function wordAreaStyle() {
   try {
@@ -234,7 +237,7 @@ addEventListener("resize", () => { if (lastMode !== "html") return; fitDeck(); s
 function resultsRows() {
   return S.qs.ids.map((vk) => {
     const q = LESSON.questions[L.baseId(vk)] || {}, item = S.qs.items[vk] || {};
-    const v = Object.values(VOTES[vk] || {}), right = v.filter((x) => x.a === q.correct).length;
+    const v = Object.values(VOTES[vk] || {}), right = v.filter((x) => isRight(q, x)).length;
     const pct = v.length ? Math.round((right / v.length) * 100) : 0;
     return `<div class="rr"><b>${esc(item.card || "")}</b><span class="rt">${esc((item.prompt || "").slice(0, 48))}</span><span class="rb"><i style="width:${pct}%"></i></span><span>${pct}%</span></div>`;
   }).join("");
@@ -260,11 +263,35 @@ function paintAsHinge(sec) {
   }
 }
 
+/** Question builder slides (more than one answer, tiles, fill in the blanks): live counts written into the slide. */
+function paintLlq(sec) {
+  const vk = S.qs.ids[0], q = LESSON.questions[L.baseId(vk)] || {}, item = S.qs.items[vk] || {};
+  const open = !!(S.open && S.open[vk]), joined = Object.keys(PRES).length;
+  const vs = Object.values(VOTES[vk] || {}), n = vs.length, right = vs.filter((v) => isRight(q, v)).length, pct = n ? Math.round((100 * right) / n) : 0;
+  const showCounts = S.results || !open;   // while answering, counts only if you press R
+  if (q.type === "fill") {
+    const fr = sec.querySelector(".lq-fres");
+    if (fr) fr.innerHTML = showCounts && n ? fillStats(q.blanks, VOTES[vk]).map((b, i) => `<div class="lq-fr"><span class="lq-bn">${i + 1}</span><b>${b.pct}%</b>${b.top.map((x) => `<span class="lq-chip ${x.ok ? "ok" : ""}">${esc(x.w)} <i>${x.n}</i></span>`).join("")}</div>`).join("") : "";
+  } else {
+    const c = tally(VOTES[vk], Object.keys(item.options || {}));
+    sec.querySelectorAll("[data-opt]").forEach((o) => { const t = o.querySelector(".lq-n"); if (t) t.textContent = showCounts ? c[o.getAttribute("data-opt")] || 0 : "·"; });
+  }
+  const what = q.type === "fill" ? "got every blank" : q.type === "multi" ? "ticked exactly the right ones" : "right";
+  const res = sec.querySelector(".lq-res");
+  if (res) res.textContent = !n ? "No answers yet" : open && !S.results ? `${n} of ${joined || n} answered` : `${n} of ${joined || n} answered · ${right} ${what} (${pct}%)`;
+  const vd = sec.querySelector(".verdict");
+  if (vd) {
+    if (!n || open) { vd.textContent = "Decide"; vd.className = "verdict"; }
+    else if (pct >= 80) { vd.textContent = `Move on — ${pct}% ${what === "right" ? "correct" : what}.`; vd.className = "verdict go"; }
+    else { vd.textContent = `Re-teach first — ${pct}% ${what === "right" ? "correct" : what}`; vd.className = "verdict stop"; }
+  }
+}
+
 /** The original deck marks the right hinge option (.right) — the whole class can see the TV, so that mark
  *  only goes back on once the answer is revealed (A, or the deck's answer build, which also closes voting). */
 function hideRightOption(sec) {
-  if (!sec.classList.contains("hinge")) return;
-  const opts = [...sec.querySelectorAll(".hopt")];
+  if (!sec.classList.contains("hinge") && !sec.classList.contains("llq")) return;
+  const opts = [...sec.querySelectorAll(".hopt, .lq-opt")];
   opts.forEach((o) => { if (o.classList.contains("right")) o.dataset.llRight = "1"; });
   const it = LESSON && S.qs && LESSON.order[S.pos], vk = S.qs && S.qs.ids[0];
   const shown = !!(it && it.t === "html" && it.n === deck.state.n && S.reveal && S.reveal[vk]);   // revealed, for THIS slide
@@ -282,6 +309,11 @@ function paintDeckResults() {
   hideRightOption(sec);
   if (S.qs && S.qs.type === "mcq" && sec.classList.contains("hinge") && sec.querySelector(".hopt .tc")) {
     paintAsHinge(sec);   // the deck's own tally + verdict, filled live
+    deckResultsDrawn = true;
+    return;
+  }
+  if (S.qs && sec.classList.contains("llq") && ["multi", "tile", "fill"].includes(S.qs.type)) {
+    paintLlq(sec);       // the question builder's slides: counts, "n answered · x right", per-blank results, verdict
     deckResultsDrawn = true;
     return;
   }
@@ -352,7 +384,7 @@ function attach(f) {
   };
   const NAV = { ArrowRight: "next", ArrowDown: "next", PageDown: "next", " ": "next", Enter: "next", n: "next", N: "next",
     ArrowLeft: "prev", ArrowUp: "prev", PageUp: "prev", Backspace: "prev", p: "prev", P: "prev",
-    j: "join", J: "join", f: "fullscreen", F: "fullscreen", s: "board", S: "board", d: "devices", D: "devices" };
+    j: "join", J: "join", f: "fullscreen", F: "fullscreen", s: "board", S: "board" };
   const Q_KEYS = { v: "vote", V: "vote", r: "results", R: "results", a: "reveal", A: "reveal" };
   const overlayOpen = () => !!w.document.querySelector(".ov.show") || !!(w.document.getElementById("blank") || {}).className;
   w.addEventListener("keydown", (e) => {
@@ -427,7 +459,6 @@ const act = {
   reveal: () => S && S.qs && LESSON && L.reveal(CODE, S, LESSON, PRES),
   join: () => S && L.toggleJoin(CODE, S),
   board: () => S && L.toggleBoard(CODE, S),
-  devices: () => toggleDev(),
   fullscreen: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {})),
 };
 L.bindKeys(act);
@@ -450,7 +481,6 @@ function hud() {
     <button class="btn ${S.results ? "on" : ""}" data-a="results">Results</button>
     <button class="btn ${revealed ? "on" : ""}" data-a="reveal">Answer</button>` : ""}
     ${S.points !== false ? `<button class="btn ${S.board ? "on" : ""}" data-a="board">Leaderboard</button>` : ""}
-    <button class="btn ${devOn ? "on" : ""}" data-a="devices">Student view</button>
     <button class="btn" data-a="fullscreen">⛶</button>`;
 }
 function wake() {

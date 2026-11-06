@@ -51,6 +51,47 @@ export function detectQuestions(sec, n) {
     return { type: "mcq", ids: [id], items: { [id]: q }, time: q.time, title: q.prompt };
   }
 
+  // the newer question slides the question builder makes (class "llq"):
+  //   data-q="multi"  more than one right answer   data-correct="AC"
+  //   data-q="tile"   select the right tile          data-correct="E"
+  //   data-q="fill"   fill in the blanks             data-accept="sensor|sensors;actuator"  (blanks: .lq-blank in [data-prompt])
+  if (sec.classList.contains("llq") && ["multi", "tile", "fill"].includes(kind)) {
+    const id = (sec.getAttribute("data-qid") || `Q${slideNo}`).replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 60);
+    const flag = sec.querySelector(".lq-flag[data-step]");
+    const ansStep = flag ? +flag.getAttribute("data-step") || 1 : builds.length ? Math.min(...builds.map((b) => +b.getAttribute("data-step") || 1)) : 0;
+    const base = {
+      id, type: kind, explain: sec.getAttribute("data-explain") || "", reteach: txt(sec.querySelector(".lq-dec p")),
+      time: Math.max(10, +sec.getAttribute("data-time") || 30), ansStep, slide: slideNo,
+      ansIdx: builds.map((b, i) => ((+b.getAttribute("data-step") || 0) >= ansStep ? i : -1)).filter((i) => i >= 0),
+    };
+    let q;
+    if (kind === "fill") {
+      const pe = sec.querySelector("[data-prompt]") || sec.querySelector("h2");
+      const c = pe ? pe.cloneNode(true) : null;
+      if (c) c.querySelectorAll(".lq-blank").forEach((b) => b.replaceWith(" ___ "));
+      const blanks = (sec.getAttribute("data-accept") || "").split(";").map((b) => b.split("|").map((s) => s.trim()).filter(Boolean));
+      q = { ...base, prompt: txt(c).replace(/\s*___\s*/g, " ___ ").trim(), blanks };
+      if (!blanks.length || blanks.some((b) => !b.length)) return null;
+    } else {
+      const options = {}, notes = {};
+      sec.querySelectorAll("[data-opt]").forEach((o) => {
+        const k = o.getAttribute("data-opt");
+        options[k] = txt(o.querySelector(".t")) || `Option ${k}`;
+        const w = txt(o.querySelector(".lq-why:not(.ok)"));
+        if (w) notes[k] = w;
+        o.classList.remove("right");                    // students' copy must not show which ones are right
+      });
+      if (Object.keys(options).length < 2) return null;
+      q = {
+        ...base, prompt: txt(sec.querySelector("[data-prompt]")) || h2, options, notes, why: notes,
+        correct: kind === "multi" ? (sec.getAttribute("data-correct") || "").toUpperCase().replace(/[^A-L]/g, "").split("").sort().join("") : sec.getAttribute("data-correct") || "",
+        misconceptions: json(sec.getAttribute("data-mc"), {}), mono: !!sec.querySelector("[data-opt] .t.mono"),
+      };
+    }
+    ["data-correct", "data-accept", "data-mc", "data-explain"].forEach((a) => sec.removeAttribute(a));
+    return { type: kind, ids: [id], items: { [id]: q }, time: q.time, title: q.prompt };
+  }
+
   if (kind === "mcq") {
     const id = sec.getAttribute("data-qid") || `H${slideNo}`;
     const options = {};

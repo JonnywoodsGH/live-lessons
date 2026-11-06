@@ -4,6 +4,7 @@
 import { r, read, update, set, serverTimestamp } from "./fb.js";
 import { ymd, countWords, encodeKey } from "./ui.js";
 import { prepSection } from "./deckview.js";
+import { isRight } from "./qtypes.js";
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no I/L/O/0/1
 const lessonCache = {}, slideCache = {}, shellCache = {}, prepCache = {};
@@ -22,12 +23,14 @@ export async function loadLesson(lessonId, fresh) {
         if (it.t === "hinge") it.t = "q";
         if (it.q && !Array.isArray(it.q.ids)) it.q.ids = Object.values(it.q.ids || {});
       });
-      Object.values(l.questions).forEach((q) => { if (q.ansIdx && !Array.isArray(q.ansIdx)) q.ansIdx = Object.values(q.ansIdx); if (q.accept && !Array.isArray(q.accept)) q.accept = Object.values(q.accept); });
+      Object.values(l.questions).forEach((q) => { if (q.ansIdx && !Array.isArray(q.ansIdx)) q.ansIdx = Object.values(q.ansIdx); if (q.accept && !Array.isArray(q.accept)) q.accept = Object.values(q.accept); if (q.blanks) q.blanks = listOfLists(q.blanks); });
     }
     lessonCache[lessonId] = l;
   }
   return lessonCache[lessonId];
 }
+// the database can hand lists back as {0: …, 1: …}
+export const listOfLists = (x) => (Array.isArray(x) ? x : Object.values(x || {})).map((b) => (Array.isArray(b) ? b : Object.values(b || {})));
 export async function slideImg(lessonId, n) {
   const k = lessonId + "/" + n;
   if (!slideCache[k]) slideCache[k] = read(`slides/${lessonId}/${n}`);
@@ -62,7 +65,8 @@ function publicItem(q, round) {
   if (q.mono) p.mono = true;
   if (q.fig) p.fig = true;
   if (q.card) p.card = q.card;
-  if (q.type === "mcq") {
+  if (q.type === "fill") p.nb = (q.blanks || []).length;
+  if (q.type === "mcq" || q.type === "multi" || q.type === "tile") {
     p.options = {};
     Object.keys(q.options || {}).forEach((k) => { if (q.options[k] !== "" && q.options[k] != null) p.options[k] = String(q.options[k]); });
     p.confidence = q.confidence === true;
@@ -74,6 +78,7 @@ async function keyFor(lesson, q) {
   const k = { c: q.correct || "", x: q.explain || "" };
   if (q.why && Object.keys(q.why).length) k.w = q.why;   // why each wrong option is wrong (AS-style hinge)
   if (q.accept && q.accept.length) k.acc = q.accept;
+  if (q.blanks && q.blanks.length) k.bl = q.blanks;
   const it = lesson.order.find((o) => o.t === "html" && o.q && o.q.ids.includes(q.id));
   if (it && q.ansIdx && q.ansIdx.length) {
     const p = await prepped(lesson.id, it.n);
@@ -174,7 +179,7 @@ export async function goTo(code, lesson, pos, st = 0) {
       if (st >= first && samePos && s && s.open) closeInto(u, code, s, null);
       ids.forEach((vk) => {
         const q = lesson.questions[baseId(vk)];
-        if (q && q.ansStep && q.ansStep <= st) u[`${S}/reveal/${vk}`] = q.type === "word" ? "*" : q.correct || "*";
+        if (q && q.ansStep && q.ansStep <= st) u[`${S}/reveal/${vk}`] = revealVal(q);
       });
     }
   } else {
@@ -189,6 +194,9 @@ export async function goTo(code, lesson, pos, st = 0) {
     if (it && it.t === "html") prepped(lesson.id, it.n).catch(() => {});
   });
 }
+
+// what students' screens get when the answer is revealed: the right letter(s), or "*" (typed answers: the key has them)
+const revealVal = (q) => (!q || q.type === "word" || q.type === "fill" ? "*" : q.correct || "*");
 
 function openInto(u, code, s, qs) {
   const S = `sessions/${code}`;
@@ -228,7 +236,7 @@ export async function reveal(code, s, lesson, presence) {
   const all = s.qs.ids.every((vk) => s.reveal && s.reveal[vk]);
   s.qs.ids.forEach((vk) => {
     const q = lesson.questions[baseId(vk)];
-    u[`sessions/${code}/reveal/${vk}`] = all ? null : q && q.type === "word" ? "*" : (q && q.correct) || "*";
+    u[`sessions/${code}/reveal/${vk}`] = all ? null : revealVal(q);
   });
   await update(r("/"), u);
 }
@@ -274,7 +282,8 @@ export async function endSession(code, review) {
 }
 
 /* ---------------- scores, leaderboard, word clouds ---------------- */
-/** Points: 500–1000 for a correct answer, more for a faster one; word answers score if they match the accepted list. */
+/** Points: 500–1000 for a correct answer, more for a faster one. Typed answers score if they match the accepted list;
+ *  "more than one answer" needs exactly the right set ticked, and "fill in the blanks" every blank right. */
 export function computeScores(lesson, s, votes, roster, progress) {
   const by = {};
   if (!s) return { by, board: [] };
@@ -285,10 +294,7 @@ export function computeScores(lesson, s, votes, roster, progress) {
     Object.entries(votes[vk] || {}).forEach(([uid, v]) => {
       const me = (by[uid] = by[uid] || { p: 0, right: 0, done: 0 });
       me.done++;
-      const ok = q.type === "word"
-        ? (q.accept || []).map((a) => a.toLowerCase()).includes(String(v.w || "").trim().toLowerCase())
-        : !!q.correct && v.a === q.correct;
-      if (!ok) return;
+      if (!isRight(q, v)) return;
       me.right++;
       if (s.points === false) return;
       const start = s.mode === "self" ? progress && progress[uid] && progress[uid].seen && progress[uid].seen[vk] : s.opened && s.opened[vk];
@@ -403,7 +409,7 @@ export function bindKeys(h) {
       ArrowRight: "next", PageDown: "next", " ": "next", ArrowDown: "next",
       ArrowLeft: "prev", PageUp: "prev", ArrowUp: "prev",
       v: "vote", V: "vote", r: "results", R: "results", a: "reveal", A: "reveal",
-      j: "join", J: "join", f: "fullscreen", F: "fullscreen", s: "board", S: "board", d: "devices", D: "devices",
+      j: "join", J: "join", f: "fullscreen", F: "fullscreen", s: "board", S: "board",
     };
     const act = map[e.key];
     if (act && h[act]) { e.preventDefault(); h[act](); }

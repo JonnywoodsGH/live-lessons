@@ -99,20 +99,32 @@ export function parseHinges(text, slideCount) {
     if (!h.prompt) throw new Error(`${where}: needs a "prompt".`);
     const after = Number(h.after);
     if (!Number.isInteger(after) || after < 0 || after > slideCount) throw new Error(`${where}: "after" must be a slide number from 0 to ${slideCount}.`);
-    const type = h.type === "word" ? "word" : "mcq";
+    const type = ["word", "multi", "tile", "fill"].includes(h.type) ? h.type : "mcq";
     const base = { id: h.id, type, after, prompt: String(h.prompt), explain: h.explain || h.teacher_note || "", time: +h.time || (type === "word" ? 45 : 30) };
     if (type === "word") {
       questions[h.id] = { ...base, accept: (h.accept || []).map(String) };
       return;
     }
-    const opts = Object.keys(h.options || {}).filter((k) => /^[A-F1-6]$/.test(k) && h.options[k] !== "");
-    if (opts.length < 2) throw new Error(`${where}: needs at least two options A–F.`);
-    if (h.correct && !opts.includes(h.correct)) throw new Error(`${where}: "correct" must be one of ${opts.join(", ")}.`);
+    if (type === "fill") {
+      // "prompt": "The ___ measures and the ___ acts", "blanks": [["sensor","sensors"], ["actuator"]]
+      const blanks = (h.blanks || []).map((b) => [].concat(b).map(String).filter(Boolean));
+      const n = String(h.prompt).split("___").length - 1;
+      if (!n || n > 6) throw new Error(`${where}: write each blank as ___ in the prompt (1 to 6 blanks).`);
+      if (blanks.length !== n || blanks.some((b) => !b.length)) throw new Error(`${where}: "blanks" needs one list of accepted answers for each of the ${n} blank${n > 1 ? "s" : ""}.`);
+      questions[h.id] = { ...base, blanks };
+      return;
+    }
+    const opts = Object.keys(h.options || {}).filter((k) => (type === "mcq" ? /^[A-F1-6]$/ : /^[A-L]$/).test(k) && h.options[k] !== "");
+    if (opts.length < 2) throw new Error(`${where}: needs at least two options ${type === "mcq" ? "A–F" : "A–L"}.`);
+    const correct = type === "multi" ? [].concat(h.correct || []).join("").toUpperCase().replace(/[^A-L]/g, "").split("").sort().join("") : h.correct || "";
+    if (type === "multi" && correct && ![...correct].every((k) => opts.includes(k))) throw new Error(`${where}: every letter in "correct" must be one of ${opts.join(", ")}.`);
+    if (type !== "multi" && correct && !opts.includes(correct)) throw new Error(`${where}: "correct" must be one of ${opts.join(", ")}.`);
     questions[h.id] = {
       ...base, code: h.code ? String(h.code) : "", options: Object.fromEntries(opts.map((k) => [k, String(h.options[k])])),
-      correct: h.correct || "", misconceptions: h.misconceptions || {}, notes: h.notes || {},
-      confidence: h.confidence !== false, teacher_note: h.teacher_note || "",
+      correct, misconceptions: h.misconceptions || {}, notes: h.notes || {}, why: type === "multi" ? h.notes || {} : undefined,
+      confidence: type === "mcq" && h.confidence !== false, teacher_note: h.teacher_note || "",
     };
+    if (questions[h.id].why === undefined) delete questions[h.id].why;
   });
   return { questions, list: Object.values(questions) };
 }

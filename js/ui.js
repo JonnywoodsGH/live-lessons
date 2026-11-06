@@ -1,7 +1,8 @@
 // Small shared helpers: escaping, toasts, hinge-question rendering, join links.
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-export const LETTERS = ["A", "B", "C", "D", "E", "F", "1", "2", "3", "4", "5", "6"];
+export const LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "1", "2", "3", "4", "5", "6"];
+import { TYPE_NAME, fillParts, blankMarks, splitFill, normText } from "./qtypes.js";
 
 export function toast(msg, ms = 2600) {
   const t = document.createElement("div");
@@ -24,7 +25,12 @@ export function optionLetters(q) { return LETTERS.filter((l) => q && q.options &
 export function tally(votes, letters) {
   const t = { total: 0 };
   letters.forEach((l) => (t[l] = 0));
-  Object.values(votes || {}).forEach((v) => { if (v && t[v.a] != null) { t[v.a]++; t.total++; } });
+  // "more than one answer" votes hold several letters ("AC"): each ticked option counts
+  Object.values(votes || {}).forEach((v) => {
+    const ks = v && v.a ? (String(v.a).length > 1 ? String(v.a).split("") : [v.a]).filter((k) => t[k] != null) : [];
+    if (!ks.length) return;
+    ks.forEach((k) => t[k]++); t.total++;
+  });
   return t;
 }
 
@@ -40,15 +46,17 @@ export function hingeSlideHtml(q, opts = {}) {
   return `
   <div class="hinge-slide ${opts.reveal ? "is-reveal" : ""} ${opts.showResults ? "has-results" : ""}">
     <div class="hs-top">
-      <span class="hs-kicker">Hinge question${q.round > 1 ? " · round " + q.round : ""}</span>
+      <span class="hs-kicker">${esc(TYPE_NAME[q.type] || TYPE_NAME.mcq)}${q.round > 1 ? " · round " + q.round : ""}</span>
       <span class="hs-status ${opts.open ? "live" : ""}">${esc(status)}${opts.open || opts.closed ? ` · ${opts.answered || 0}${opts.joined ? " / " + opts.joined : ""} answered` : ""}</span>
     </div>
     <h1 class="hs-prompt">${esc(q.prompt)}</h1>
     ${q.code ? `<div class="hs-code">${esc(q.code)}</div>` : ""}
-    <div class="hs-options n${letters.length}">
+    ${q.type === "multi" ? `<div class="hs-hint">Tick every right answer</div>` : ""}
+    <div class="hs-options n${letters.length} ${q.type === "tile" ? "tiles" : ""}">
       ${letters.map((l) => {
         const n = counts[l] || 0, pct = counts.total ? Math.round((n / counts.total) * 100) : 0;
-        const cls = opts.reveal ? (l === opts.reveal ? "correct" : "dim") : "";
+        const right = opts.reveal && (q.type === "multi" ? String(opts.reveal).includes(l) : l === opts.reveal);
+        const cls = opts.reveal ? (right ? "correct" : "dim") : "";
         return `<div class="hs-opt ${cls}">
           <span class="hs-letter">${l}</span>
           <span class="hs-text ${isCodeLike(q.options[l]) ? "mono" : ""}">${esc(q.options[l])}</span>
@@ -57,6 +65,37 @@ export function hingeSlideHtml(q, opts = {}) {
       }).join("")}
     </div>
   </div>`;
+}
+
+/** Fill in the blanks as a slide (projector + teacher preview). opts: {votes, blanks, showResults, reveal, answered, joined, open} */
+export function fillSlideHtml(q, opts = {}) {
+  const parts = fillParts(q.prompt), bl = opts.blanks || [];
+  const status = opts.reveal ? "Answer" : opts.open ? "Answering" : opts.closed ? "Closed" : "Get ready";
+  const sent = parts.map((t, i) => esc(t) + (i < parts.length - 1 ? `<span class="hs-blank">${opts.reveal && bl[i] ? esc(bl[i][0]) : (i + 1)}</span>` : "")).join("");
+  return `<div class="hinge-slide ${opts.reveal ? "is-reveal" : ""}">
+    <div class="hs-top"><span class="hs-kicker">${esc(TYPE_NAME.fill)}${q.round > 1 ? " · round " + q.round : ""}</span>
+      <span class="hs-status ${opts.open ? "live" : ""}">${esc(status)}${opts.open || opts.closed ? ` · ${opts.answered || 0}${opts.joined ? " / " + opts.joined : ""} answered` : ""}</span></div>
+    <h1 class="hs-prompt hs-fill">${sent}</h1>
+    ${opts.showResults && bl.length ? fillResultsHtml(bl, opts.votes) : ""}
+  </div>`;
+}
+/** Per blank: % right and the most common answers. */
+export function fillStats(blanks, votes) {
+  const vs = Object.values(votes || {}).filter((v) => v && v.f != null);
+  return (blanks || []).map((acc, i) => {
+    const m = new Map();
+    let right = 0;
+    vs.forEach((v) => {
+      const w = splitFill(v.f)[i] || "", k = normText(w);
+      if (blankMarks([acc], [w].join("|"))[0]) right++;
+      if (k) m.set(k, { w: (m.get(k) || {}).w || w.trim(), n: ((m.get(k) || {}).n || 0) + 1, ok: (acc || []).map(normText).includes(k) });
+    });
+    return { n: vs.length, right, pct: vs.length ? Math.round((100 * right) / vs.length) : null, top: [...m.values()].sort((a, b) => b.n - a.n).slice(0, 5) };
+  });
+}
+export function fillResultsHtml(blanks, votes) {
+  return `<div class="hs-fres">${fillStats(blanks, votes).map((b, i) => `<div class="fr"><span class="hs-blank sm">${i + 1}</span><b>${b.pct == null ? "–" : b.pct + "%"}</b>
+    <span class="fr-top">${b.top.map((x) => `<span class="${x.ok ? "ok" : ""}">${esc(x.w)} <i>${x.n}</i></span>`).join("")}</span></div>`).join("")}</div>`;
 }
 
 export function fmtTime(ms) {

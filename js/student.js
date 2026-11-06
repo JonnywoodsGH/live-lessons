@@ -7,6 +7,7 @@ import { $, esc, isCodeLike, cloudHtml, boardHtml, fmtSecs, normS } from "./ui.j
 import { deckView } from "./deckview.js";
 import { startNotes, stopNotes, setNotesTitle, setSlide, setReview, notesButton, paintDock, toggleNotes, sendNotesAtEnd, endedNotesHtml, wireEnded } from "./notes.js";
 import { startAway, stopAway, awayText } from "./away.js";
+import { TYPE_NAME, letters, fillParts, blankMarks, splitFill } from "./qtypes.js";
 
 const app = $("#app");
 const CONF = [[1, "Guessing"], [2, "Not sure"], [3, "Fairly sure"], [4, "Certain"]];
@@ -37,8 +38,14 @@ function paint(mainHtml, showDeck, below = "") {
   // slides use the whole screen; questions and messages stay in a readable column
   const wide = showDeck || /class="s-slide"/.test(mainHtml);
   app.querySelector(".s-main").classList.toggle("wide", wide);
+  // keep the cursor where it was if the screen repaints while a student is typing (blanks, one word)
+  const a = document.activeElement, f = a && a.tagName === "INPUT" && a.form && a.form.dataset.vk ? { vk: a.form.dataset.vk, n: a.name, at: a.selectionStart } : null;
   $("#main").innerHTML = mainHtml;
   $("#below").innerHTML = below;
+  if (f) {
+    const el = [...app.querySelectorAll(`form[data-vk] input[name="${f.n}"]`)].find((x) => x.form.dataset.vk === f.vk);
+    if (el) { el.focus(); try { el.setSelectionRange(f.at, f.at); } catch (e) {} }
+  }
 }
 /** ⛶ in the header: the whole student page goes full screen (laptops, Android, iPad — not iPhone).
  *  It stays full screen through slide changes and questions, with the header and notes still there. */
@@ -200,7 +207,7 @@ function loadKeys() {
   Object.keys(voteSubs).forEach((vk) => {
     if (KEYS[vk] || keyLoading[vk] || !canSeeKey(vk)) return;
     keyLoading[vk] = true;
-    read(`keys/${code}/${vk}`).then((k) => { k = k || {}; if (k.acc && !Array.isArray(k.acc)) k.acc = Object.values(k.acc); KEYS[vk] = k; rerender(); }).catch(() => {}).finally(() => (keyLoading[vk] = false));
+    read(`keys/${code}/${vk}`).then((k) => { k = k || {}; if (k.acc && !Array.isArray(k.acc)) k.acc = Object.values(k.acc); if (k.bl) k.bl = (Array.isArray(k.bl) ? k.bl : Object.values(k.bl)).map((b) => (Array.isArray(b) ? b : Object.values(b || {}))); KEYS[vk] = k; rerender(); }).catch(() => {}).finally(() => (keyLoading[vk] = false));
   });
 }
 const rerender = () => (S && S.mode === "self" ? renderSelf() : render());
@@ -246,7 +253,7 @@ function itemState(vk, open) {
   const rev = S.reveal && S.reveal[vk];
   const correct = key && key.c ? key.c : rev && rev !== "*" ? rev : null;
   return {
-    open, mine, correct, explain: key ? key.x : "", why: key && key.w, accept: key && key.acc, sending: !!sending[vk],
+    open, mine, correct, explain: key ? key.x : "", why: key && key.w, accept: key && key.acc, blanks: key && key.bl, sending: !!sending[vk],
     canChange: S.mode !== "self" && open,
   };
 }
@@ -292,32 +299,146 @@ function wordHtml(vk, it, open) {
   const okWord = st.mine && acc && acc.map((a) => a.toLowerCase()).includes(String(st.mine.w).toLowerCase());
   return `<div class="s-item">
     <div class="s-prompt">${esc(it.prompt)}</div>
-    ${can ? `<form class="wform" data-vk="${esc(vk)}"><input type="text" name="w" maxlength="30" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="One word" value="${esc(st.mine ? st.mine.w : "")}"><button class="btn accent" ${st.sending ? "disabled" : ""}>${st.mine ? "Change" : "Send"}</button></form>` : ""}
+    ${can ? `<form class="wform" data-vk="${esc(vk)}"><input type="text" name="w" maxlength="30" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="One word" value="${esc(pick[vk] && pick[vk].w != null ? pick[vk].w : st.mine ? st.mine.w : "")}"><button class="btn accent" ${st.sending ? "disabled" : ""}>${st.mine ? "Change" : "Send"}</button></form>` : ""}
     ${st.mine ? `<div class="fb ${acc ? (okWord ? "ok" : "bad") : "muted"}">You wrote <b>${esc(st.mine.w)}</b>${acc ? (okWord ? " ✓" : ` · expected: ${esc(acc.join(" / "))}`) : ""}</div>` : ""}
     ${showCloud ? cloudHtml(words, { mine: st.mine && st.mine.w, accept: acc }) : `<p class="small muted">Everyone's words appear here after you send yours.</p>`}
   </div>`;
 }
 
+/* more than one answer: tick every right option, then Send (can change until time's up) */
+function multiHtml(vk, it, open) {
+  const st = itemState(vk, open);
+  const keys = Object.keys(it.options || {});
+  const can = st.open && (!st.mine || st.canChange) && !st.sending;
+  const chosen = pick[vk] && pick[vk].m != null ? pick[vk].m : st.mine ? letters(st.mine.a) : "";
+  const right = st.correct ? letters(st.correct) : "";
+  const changed = st.mine && letters(st.mine.a) !== chosen;
+  const opts = keys.map((k) => {
+    const on = chosen.includes(k);
+    let cls = on ? "sel" : "";
+    if (right && st.mine) { const mine = letters(st.mine.a).includes(k); cls = right.includes(k) ? (mine ? "correct" : "missed") : mine ? "wrong" : ""; }
+    return `<button class="s-opt multi ${cls}" data-vk="${esc(vk)}" data-tick="${esc(k)}" ${can ? "" : "disabled"} aria-pressed="${on}"><span class="l">${esc(k)}</span><span class="${isCodeLike(it.options[k]) ? "mono" : ""}">${esc(it.options[k])}</span><span class="tick">${on ? "✓" : ""}</span></button>`;
+  }).join("");
+  let fb = "";
+  if (!st.mine) fb = st.open ? "" : `<div class="fb muted">No answer</div>`;
+  else if (!right) fb = `<div class="fb muted">${st.sending ? "Sending…" : changed ? "Not sent yet — press Send" : st.canChange ? "Sent — you can change it until time's up" : "Answer sent ✓"}</div>`;
+  else {
+    const ok = letters(st.mine.a) === right;
+    const whys = letters(st.mine.a).split("").filter((k) => !right.includes(k) && st.why && st.why[k]).map((k) => `<span>Why not ${esc(k)}: ${esc(st.why[k])}</span>`).join("");
+    const missed = right.split("").filter((k) => !letters(st.mine.a).includes(k));
+    fb = `<div class="fb ${ok ? "ok" : "bad"}">${ok ? "✓ All correct" : `✗ The right answers are ${esc(right.split("").join(" and "))}${missed.length ? ` · you missed ${esc(missed.join(", "))}` : ""}`}${whys}${st.explain ? `<span>${esc(st.explain)}</span>` : ""}</div>`;
+  }
+  return `<div class="s-item">
+    <div class="s-prompt ${it.mono ? "mono" : ""}">${esc(it.prompt)}</div>
+    <div class="small muted">Tick every answer you think is right.</div>
+    <div class="s-opts">${opts}</div>
+    ${can ? `<button class="btn accent s-send" data-send="${esc(vk)}" ${chosen && (!st.mine || changed) ? "" : "disabled"}>${st.mine ? "Change my answer" : "Send"}</button>` : ""}
+    ${fb}
+  </div>`;
+}
+
+/* select the right tile: a grid of tiles, tap one */
+function tileHtml(vk, it, open) {
+  const st = itemState(vk, open);
+  const keys = Object.keys(it.options || {});
+  const chosen = (st.mine && st.mine.a) || (pick[vk] && pick[vk].a);
+  const can = st.open && (!st.mine || st.canChange) && !st.sending;
+  return `<div class="s-item">
+    <div class="s-prompt">${esc(it.prompt)}</div>
+    <div class="s-tiles n${keys.length}">${keys.map((k) => {
+      let cls = chosen === k ? "sel" : "";
+      if (st.correct && st.mine) cls = k === st.correct ? "correct" : st.mine.a === k ? "wrong" : "dim";
+      return `<button class="s-tile ${cls}" data-vk="${esc(vk)}" data-opt="${esc(k)}" ${can ? "" : "disabled"}><span class="${isCodeLike(it.options[k]) ? "mono" : ""}">${esc(it.options[k])}</span><span class="l">${esc(k)}</span></button>`;
+    }).join("")}</div>
+    ${feedbackHtml(st, it)}
+  </div>`;
+}
+
+/* fill in the blanks: the sentence with a box for each blank */
+function fillHtml(vk, it, open) {
+  const st = itemState(vk, open);
+  const parts = fillParts(it.prompt), nb = Math.max(1, it.nb || parts.length - 1);
+  const can = st.open && (!st.mine || st.canChange) && !st.sending;
+  const mine = st.mine ? splitFill(st.mine.f) : [];
+  const draft = (pick[vk] && pick[vk].f) || mine;
+  const marks = st.mine && st.blanks ? blankMarks(st.blanks, st.mine.f) : null;
+  const sent = parts.map((t, i) => {
+    if (i >= parts.length - 1) return esc(t);
+    const cls = marks ? (marks[i] ? "ok" : "bad") : "";
+    const box = can
+      ? `<input class="blank-in" name="b${i}" data-i="${i}" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Blank ${i + 1}" value="${esc(draft[i] || "")}" style="--ch:${Math.max(6, (draft[i] || "").length + 2)}">`
+      : `<span class="blank-out ${cls}">${esc(mine[i] || "…")}</span>`;
+    return esc(t) + box;
+  }).join("");
+  let fb = "";
+  if (!st.mine) fb = st.open ? "" : `<div class="fb muted">No answer</div>`;
+  else if (!marks) fb = `<div class="fb muted">${st.sending ? "Sending…" : st.canChange ? "Sent — you can change it until time's up" : "Answer sent ✓"}</div>`;
+  else {
+    const ok = marks.every(Boolean);
+    const fix = marks.map((m, i) => (m ? "" : `<span>Blank ${i + 1}: ${esc(st.blanks[i].join(" / "))}</span>`)).join("");
+    fb = `<div class="fb ${ok ? "ok" : "bad"}">${ok ? "✓ All correct" : `✗ ${marks.filter(Boolean).length} of ${marks.length} right`}${fix}${st.explain ? `<span>${esc(st.explain)}</span>` : ""}</div>`;
+  }
+  return `<div class="s-item">
+    <form class="fform" data-vk="${esc(vk)}" data-nb="${nb}">
+      <div class="s-prompt s-fill">${sent}</div>
+      ${can ? `<button class="btn accent" ${st.sending ? "disabled" : ""}>${st.mine ? "Change my answer" : "Send"}</button>` : ""}
+    </form>
+    ${fb}
+  </div>`;
+}
+
+function itemHtml(vk, it, open) {
+  if (it.type === "word") return wordHtml(vk, it, open);
+  if (it.type === "fill") return fillHtml(vk, it, open);
+  if (it.type === "multi") return multiHtml(vk, it, open);
+  if (it.type === "tile") return tileHtml(vk, it, open);
+  return mcqHtml(vk, it, open);
+}
+
 function questionsHtml(type, round, ids, items, openFn, title) {
   const done = ids.filter((vk) => MY[vk]).length;
-  const kicker = type === "set" ? `Quick check · ${done}/${ids.length} answered` : type === "word" ? "One word" : "Hinge question";
+  const kicker = type === "set" ? `Quick check · ${done}/${ids.length} answered` : TYPE_NAME[type] || TYPE_NAME.mcq;
   return `<div class="stack s-q">
     <div class="kicker">${kicker}${round > 1 ? " · round " + round : ""}</div>
     ${title && type === "set" ? `<h1>${esc(title)}</h1>` : ""}
-    ${ids.map((vk) => { const it = items[vk]; if (!it) return ""; return it.type === "word" ? wordHtml(vk, it, openFn(vk)) : mcqHtml(vk, it, openFn(vk)); }).join("")}
+    ${ids.map((vk) => { const it = items[vk]; if (!it) return ""; return itemHtml(vk, it, openFn(vk)); }).join("")}
   </div>`;
 }
 
 function currentItems() { return S.mode === "self" ? S.items || {} : (S.qs && S.qs.items) || {}; }
 function wire() {
   if (PREVIEW) return; // looking only
-  app.querySelectorAll(".s-opt[data-vk]").forEach((b) => (b.onclick = () => {
+  app.querySelectorAll(".s-opt[data-vk][data-opt], .s-tile[data-vk]").forEach((b) => (b.onclick = () => {
     const vk = b.dataset.vk, it = currentItems()[vk];
     pick[vk] = { a: b.dataset.opt };
     if (it && it.confidence && !MY[vk]) return rerender();
     submit(vk, { a: b.dataset.opt });
   }));
   app.querySelectorAll("[data-conf]").forEach((b) => (b.onclick = () => submit(b.dataset.vk, { a: pick[b.dataset.vk].a, c: +b.dataset.conf })));
+  app.querySelectorAll("[data-tick]").forEach((b) => (b.onclick = () => {
+    const vk = b.dataset.vk, k = b.dataset.tick;
+    const cur = pick[vk] && pick[vk].m != null ? pick[vk].m : MY[vk] ? letters(MY[vk].a) : "";
+    pick[vk] = { m: letters(cur.includes(k) ? cur.replace(k, "") : cur + k) };
+    rerender();
+  }));
+  app.querySelectorAll("[data-send]").forEach((b) => (b.onclick = () => {
+    const vk = b.dataset.send, m = pick[vk] && pick[vk].m;
+    if (m) submit(vk, { a: m });
+  }));
+  app.querySelectorAll("form.fform").forEach((f) => {
+    const vk = f.dataset.vk;
+    f.querySelectorAll(".blank-in").forEach((inp) => (inp.oninput = () => {
+      inp.style.setProperty("--ch", Math.max(6, inp.value.length + 2));
+      pick[vk] = { f: [...f.querySelectorAll(".blank-in")].map((x) => x.value) };
+    }));
+    f.onsubmit = (e) => {
+      e.preventDefault();
+      const vals = [...f.querySelectorAll(".blank-in")].map((x) => x.value.replace(/\|/g, "/").replace(/\s+/g, " ").trim().slice(0, 40));
+      if (!vals.some(Boolean)) return toast("Fill in at least one blank.");
+      submit(vk, { f: vals.join("|") });
+    };
+  });
+  app.querySelectorAll("form.wform input[name=w]").forEach((inp) => (inp.oninput = () => (pick[inp.form.dataset.vk] = { w: inp.value })));
   app.querySelectorAll("form.wform").forEach((f) => (f.onsubmit = (e) => {
     e.preventDefault();
     const w = (f.w.value || "").trim().split(/\s+/)[0].slice(0, 30);

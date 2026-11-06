@@ -44,9 +44,12 @@ export function buildRules(teacherEmails, schoolDomain) {
             $uid: {
               ".read": "auth != null && auth.uid == $uid",
               ".write": `${S} && auth.uid == $uid && ${active} && ((${self} && !data.exists()) || (${live} && ${sess("open")}.child($vk).val() == true))`,
-              ".validate": "newData.hasChild('t') && (newData.hasChild('a') || newData.hasChild('w'))",
-              a: { ".validate": "newData.isString() && newData.val().matches(/^[A-F1-6]$/)" },
+              ".validate": "newData.hasChild('t') && (newData.hasChild('a') || newData.hasChild('w') || newData.hasChild('f'))",
+              // a: one option (A–L, or 1–6 on card sets), or several letters for "more than one answer"
+              a: { ".validate": "newData.isString() && newData.val().matches(/^([A-L]{1,12}|[1-6])$/)" },
               w: { ".validate": "newData.isString() && newData.val().matches(/^[^ ]{1,30}$/)" },
+              // f: fill in the blanks — up to 6 answers separated by |
+              f: { ".validate": "newData.isString() && newData.val().length <= 250 && newData.val().matches(/^[^|]{0,40}([|][^|]{0,40}){0,5}$/)" },
               c: { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 4" },
               t: { ".validate": "newData.val() == now" },
               $other: { ".validate": false },
